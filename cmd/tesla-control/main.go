@@ -16,9 +16,15 @@ import (
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/account"
 	"github.com/teslamotors/vehicle-command/pkg/cli"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 	"github.com/teslamotors/vehicle-command/pkg/vehicle"
 )
+
+var version = "undefined"
+var today = "undefined"
+var hwinfo = "undefined"
+var hwarch = "undefined"
 
 func writeErr(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, a...)
@@ -128,13 +134,19 @@ func main() {
 	}
 	if debug {
 		log.SetLevel(log.LevelDebug)
+		log.Debug("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
+		ble.SetLogLevelTrace()
+	} else {
+		ble.SetLogLevelError()
 	}
+
 	config.ReadFromEnvironment()
 
 	args := flag.Args()
 	if len(args) > 0 {
 		if args[0] == "help" {
 			if len(args) == 1 {
+				writeErr("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
 				Usage()
 				return
 			}

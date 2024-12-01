@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-ble/ble"
+	// "github.com/go-ble/ble"
+	"github.com/rigado/ble"
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/connector"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
@@ -45,6 +46,36 @@ type Connection struct {
 	client      ble.Client
 	lastRx      time.Time
 	lock        sync.Mutex
+	device      ble.Device
+	rssi        int8
+}
+
+func SetLogLevelTrace() {
+	ble.SetLogLevelTrace()
+}
+
+func SetLogLevelDebug() {
+	ble.SetLogLevelDebug()
+}
+
+func SetLogLevelInfo() {
+	ble.SetLogLevelInfo()
+}
+
+func SetLogLevelWarn() {
+	ble.SetLogLevelWarn()
+}
+
+func SetLogLevelError() {
+	ble.SetLogLevelError()
+}
+
+func SetLogLevelFatal() {
+	ble.SetLogLevelFatal()
+}
+
+func SetLogLevelPanic() {
+	ble.SetLogLevelPanic()
 }
 
 func (c *Connection) PreferredAuthMethod() connector.AuthMethod {
@@ -90,7 +121,7 @@ func (c *Connection) AllowedLatency() time.Duration {
 	return maxLatency
 }
 
-func (c *Connection) rx(p []byte) {
+func (c *Connection) rx(id uint, p []byte) {
 	if time.Since(c.lastRx) > rxTimeout {
 		c.inputBuffer = []byte{}
 	}
@@ -147,7 +178,7 @@ func NewConnection(ctx context.Context, vin string) (*Connection, error) {
 }
 
 func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
-	var err error
+	var err, err2 error
 	// We don't want concurrent calls to NewConnection that would defeat
 	// the point of reusing the existing BLE device. Note that this is not
 	// an issue on MacOS, but multiple calls to newDevice() on Linux leads to failures.
@@ -173,10 +204,17 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 	canConnect := false
 	filter := func(adv ble.Advertisement) bool {
 		ln := adv.LocalName()
+		if len(ln) > 0 {
+			log.Debug("Advertisement from Name: %s [%s] RSSI: %3d:", ln, adv.Addr(), adv.RSSI())
+		}
 		if ln != localName {
 			return false
 		}
 		canConnect = adv.Connectable()
+		if canConnect {
+			log.Debug("Connectable! Services: %v, MD: %X.", adv.Services(), adv.ManufacturerData())
+		}
+
 		return true
 	}
 
@@ -207,6 +245,7 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 		vin:    vin,
 		client: client,
 		inbox:  make(chan []byte, 5),
+		device: device,
 	}
 	for _, characteristic := range characteristics {
 		if characteristic.UUID.Equal(toVehicleUUID) {
@@ -225,5 +264,9 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 		return nil, fmt.Errorf("ble: failed to subscribe to RX: %s", err)
 	}
 	log.Info("Connected to vehicle BLE")
+	conn.rssi, err2 = client.ReadRSSI()
+	if err2 == nil {
+		log.Info("RSSI %ddBm", conn.rssi)
+	}
 	return &conn, nil
 }

@@ -17,8 +17,14 @@ import (
 	"github.com/teslamotors/vehicle-command/internal/authentication"
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/cli"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 )
+
+var version = "undefined"
+var today = "undefined"
+var hwinfo = "undefined"
+var hwarch = "undefined"
 
 func writeErr(format string, a ...interface{}) {
 	fmt.Fprintf(os.Stderr, format, a...)
@@ -95,6 +101,7 @@ func main() {
 		outputFile string
 		skey       protocol.ECDHPrivateKey
 		err        error
+		debug      bool
 	)
 	status := 1
 	defer func() {
@@ -104,12 +111,19 @@ func main() {
 	config, err := cli.NewConfig(cli.FlagOAuth | cli.FlagPrivateKey)
 	config.RegisterCommandLineFlags()
 	flag.Usage = cliUsage
+	flag.BoolVar(&debug, "debug", false, "Enable verbose debugging messages")
 	flag.BoolVar(&overwrite, "f", false, "Overwrite existing key if it exists")
 	flag.StringVar(&outputFile, "output", "", "Save public key to `file`. Defaults to stdout.")
 	flag.Parse()
-
-	if config.Debug {
+	if !debug {
+		if debugEnv, ok := os.LookupEnv("TESLA_VERBOSE"); ok {
+			debug = debugEnv != "false" && debugEnv != "0"
+		}
+	}
+	if debug {
 		log.SetLevel(log.LevelDebug)
+		log.Debug("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
+		ble.SetLogLevelTrace()
 	}
 	if err != nil {
 		writeErr("Failed to load credential configuration: %s", err)
@@ -118,6 +132,7 @@ func main() {
 	config.ReadFromEnvironment()
 
 	if flag.NArg() != 1 {
+		writeErr("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
 		usage(os.Stderr)
 		return
 	}
@@ -172,6 +187,7 @@ func main() {
 	default:
 		writeErr("Unrecognized command-line argument.")
 		writeErr("")
+		writeErr("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
 		usage(os.Stderr)
 		return
 	}

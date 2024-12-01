@@ -24,10 +24,10 @@ var globalLogLevel Level
 var logMutex sync.Mutex
 
 var labels = map[Level]string{
-	LevelDebug:   "[debug]",
-	LevelInfo:    "[info ]",
-	LevelWarning: "[warn ]",
-	LevelError:   "[error]",
+	LevelDebug:   "[DEBUG]",
+	LevelInfo:    "[INFO ]",
+	LevelWarning: "[WARN ]",
+	LevelError:   "[ERROR]",
 }
 
 func SetLevel(level Level) {
@@ -44,7 +44,8 @@ func logLevel() Level {
 
 func log(level Level, format string, a ...interface{}) {
 	if level <= logLevel() {
-		msg := fmt.Sprintf("%s %s ", time.Now().Format(time.RFC3339), labels[level])
+		// msg := fmt.Sprintf("%s %s ", time.Now().Format(time.RFC3339), labels[level])
+		msg := fmt.Sprintf("%s %s ", time.Now().Format("2006-01-02 15:04:05.000"), labels[level])
 		msg += fmt.Sprintf(format, a...)
 		fmt.Fprintln(os.Stderr, msg)
 	}

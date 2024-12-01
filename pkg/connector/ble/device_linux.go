@@ -1,9 +1,13 @@
 package ble
 
 import (
-	"github.com/go-ble/ble"
-	"github.com/go-ble/ble/linux"
-	"github.com/go-ble/ble/linux/hci/cmd"
+	// "github.com/go-ble/ble"
+	// "github.com/go-ble/ble/linux"
+	// "github.com/go-ble/ble/linux/hci/cmd"
+	"github.com/rigado/ble"
+	"github.com/rigado/ble/linux"
+	"github.com/rigado/ble/linux/hci/cmd"
+
 	"time"
 )
 
@@ -16,11 +20,11 @@ var scanParams = cmd.LESetScanParameters{
 	LEScanInterval:       0x10, // 10ms
 	LEScanWindow:         0x10, // 10ms
 	OwnAddressType:       0,    // Static
-	ScanningFilterPolicy: 2,    // Basic filtered
+	ScanningFilterPolicy: 0,    // Basic unfiltered
 }
 
 func newDevice() (ble.Device, error) {
-	device, err := linux.NewDevice(ble.OptListenerTimeout(bleTimeout), ble.OptDialerTimeout(bleTimeout), ble.OptScanParams(scanParams))
+	device, err := linux.NewDevice(ble.OptListenerTimeout(bleTimeout), ble.OptDialerTimeout(bleTimeout), ble.OptTransportHCISocket(0), ble.OptScanParams(scanParams))
 	if err != nil {
 		return nil, err
 	}
