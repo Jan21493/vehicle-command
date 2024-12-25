@@ -47,9 +47,6 @@ type Connection struct {
 	lastRx      time.Time
 	lock        sync.Mutex
 	device      ble.Device
-<<<<<<< Updated upstream
-	rssi        int8
-=======
 	rssi        int
 }
 
@@ -80,7 +77,6 @@ func (scanEntry *ScanResult) LocalName() string {
 
 func (scanEntry *ScanResult) RSSI() int {
 	return scanEntry.rssi
->>>>>>> Stashed changes
 }
 
 func SetLogLevelTrace() {
@@ -216,10 +212,7 @@ func NewConnection(ctx context.Context, vin string) (*Connection, error) {
 
 func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 	var err, err2 error
-<<<<<<< Updated upstream
-=======
 	var localName string
->>>>>>> Stashed changes
 	// We don't want concurrent calls to NewConnection that would defeat
 	// the point of reusing the existing BLE device. Note that this is not
 	// an issue on MacOS, but multiple calls to newDevice() on Linux leads to failures.
@@ -309,12 +302,8 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 		return nil, fmt.Errorf("ble: failed to subscribe to RX: %s", err)
 	}
 	log.Info("Connected to vehicle BLE")
-<<<<<<< Updated upstream
-	conn.rssi, err2 = client.ReadRSSI()
-=======
 	rssi, err2 := client.ReadRSSI()
 	conn.rssi = int(rssi)
->>>>>>> Stashed changes
 	if err2 == nil {
 		log.Info("RSSI %ddBm", conn.rssi)
 	}
