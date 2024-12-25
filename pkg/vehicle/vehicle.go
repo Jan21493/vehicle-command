@@ -108,6 +108,10 @@ func (v *Vehicle) VIN() string {
 	return v.vin
 }
 
+func (v *Vehicle) RSSI() int {
+	return v.conn.RSSI()
+}
+
 func (v *Vehicle) PrivateKeyAvailable() bool {
 	return v.keyAvailable
 }

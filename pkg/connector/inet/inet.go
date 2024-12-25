@@ -166,6 +166,7 @@ type Connection struct {
 
 	wakeLock sync.Mutex
 	lastPoke time.Time
+	rssi     int
 }
 
 // NewConnection creates a Connection.
@@ -206,6 +207,10 @@ func (c *Connection) Close() {
 
 func (c *Connection) VIN() string {
 	return c.vin
+}
+
+func (c *Connection) RSSI() int {
+	return c.rssi
 }
 
 func (c *Connection) Wakeup(ctx context.Context) error {

@@ -45,6 +45,9 @@ type Connector interface {
 	// VIN returns the vehicle identification number of the connected vehicle.
 	VIN() string
 
+	// RSSI returns the vehicle received signal strength via BLE
+	RSSI() int
+
 	// Close terminates the connection a vehicle.
 	//
 	// Repeated calls to Close() must be idempotent, but the behavior of the interface is otherwise

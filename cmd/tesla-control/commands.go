@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/account"
 	"github.com/teslamotors/vehicle-command/pkg/cli"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
@@ -494,8 +495,12 @@ var commands = map[string]*Command{
 			if err != nil {
 				return err
 			}
-			slot := uint32(0)
+			var keylist []vcsec.WhitelistEntryInfo
 			var details *vcsec.WhitelistEntryInfo
+			var publicKey []byte
+			var keyRole string
+			var keyFormFactor string
+			slot := uint32(0)
 			for mask := summary.GetSlotMask(); mask > 0; mask >>= 1 {
 				if mask&1 == 1 {
 					details, err = car.KeyInfoBySlot(ctx, slot)
@@ -506,11 +511,26 @@ var commands = map[string]*Command{
 						}
 					}
 					if details != nil {
-						fmt.Printf("%02x\t%s\t%s\n", details.GetPublicKey().GetPublicKeyRaw(), details.GetKeyRole(), details.GetMetadataForKey().GetKeyFormFactor())
+						keylist = append(keylist, *details)
+						publicKey = details.GetPublicKey().GetPublicKeyRaw()
+						keyRole = fmt.Sprintf("%s", details.GetKeyRole())
+						keyFormFactor = fmt.Sprintf("%s", details.GetMetadataForKey().GetKeyFormFactor())
+						log.Debug("Key found! public key: %02x, key role: %s, key form factor : %s", publicKey, keyRole, keyFormFactor)
 					}
 				}
 				slot++
 			}
+			fmt.Printf("{\"rssi\":%d,\"keylist\":[", car.RSSI())
+			for keyno := range keylist {
+				publicKey = keylist[keyno].GetPublicKey().GetPublicKeyRaw()
+				keyRole = fmt.Sprintf("%s", keylist[keyno].GetKeyRole())
+				keyFormFactor = fmt.Sprintf("%s", keylist[keyno].GetMetadataForKey().GetKeyFormFactor())
+				if keyno > 0 {
+					fmt.Printf(",")
+				}
+				fmt.Printf("{\"publicKey\":\"%02x\",\"role\":\"%s\",\"formFactor\":\"%s\"}", publicKey, keyRole, keyFormFactor)
+			}
+			fmt.Printf("]}\n")
 			return nil
 		},
 	},
@@ -916,18 +936,28 @@ var commands = map[string]*Command{
 		domain:           protocol.DomainVCSEC,
 		requiresAuth:     false,
 		requiresFleetAPI: false,
+		optional: []Argument{
+			Argument{name: "OUTPUT", help: "'enums' or 'numbers' (default)."},
+		},
 		handler: func(ctx context.Context, acct *account.Account, car *vehicle.Vehicle, args map[string]string) error {
+			var jsondata string
 			info, err := car.BodyControllerState(ctx)
 			if err != nil {
 				return err
 			}
+			useEnumNumbers := true
+			if output, ok := args["OUTPUT"]; ok && strings.ToUpper(output) == "ENUMS" {
+				useEnumNumbers = false
+			}
 			options := protojson.MarshalOptions{
-				Indent:            "\t",
-				UseEnumNumbers:    false,
+				Multiline:         false,
+				Indent:            "",
+				UseEnumNumbers:    useEnumNumbers,
 				EmitUnpopulated:   false,
 				EmitDefaultValues: true,
 			}
-			fmt.Println(options.Format(info))
+			jsondata = options.Format(info)
+			fmt.Printf("{\"rssi\":%d,\"state\":%s}\n", car.RSSI(), jsondata)
 			return nil
 		},
 	},
@@ -1171,7 +1201,11 @@ var commands = map[string]*Command{
 		args: []Argument{
 			Argument{name: "CATEGORY", help: "One of " + strings.Join(categoryNames(), ", ")},
 		},
+		optional: []Argument{
+			Argument{name: "OUTPUT", help: "'enums' (default) or 'numbers'"},
+		},
 		handler: func(ctx context.Context, acct *account.Account, car *vehicle.Vehicle, args map[string]string) error {
+			var jsondata string
 			category, err := GetCategory(args["CATEGORY"])
 			if err != nil {
 				return err
@@ -1180,7 +1214,19 @@ var commands = map[string]*Command{
 			if err != nil {
 				return err
 			}
-			fmt.Println(protojson.Format(data))
+			useEnumNumbers := true
+			if output, ok := args["OUTPUT"]; ok && strings.ToUpper(output) == "ENUMS" {
+				useEnumNumbers = false
+			}
+			options := protojson.MarshalOptions{
+				Multiline:         false,
+				Indent:            "",
+				UseEnumNumbers:    useEnumNumbers,
+				EmitUnpopulated:   false,
+				EmitDefaultValues: true,
+			}
+			jsondata = options.Format(data)
+			fmt.Printf("{\"rssi\":%d,%s\n", car.RSSI(), jsondata[1:])
 			return nil
 		},
 	},

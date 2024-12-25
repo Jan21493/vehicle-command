@@ -47,7 +47,40 @@ type Connection struct {
 	lastRx      time.Time
 	lock        sync.Mutex
 	device      ble.Device
+<<<<<<< Updated upstream
 	rssi        int8
+=======
+	rssi        int
+}
+
+type ScanList struct {
+	scanEntries []ScanResult
+	device      ble.Device
+}
+
+type ScanResult struct {
+	localName   string
+	addr        ble.Addr
+	manufacData []byte
+	services    []ble.UUID
+	rssi        int
+}
+
+func (scanList *ScanList) ScanEntries() []ScanResult {
+	return scanList.scanEntries
+}
+
+func (scanEntry *ScanResult) ScanEntryString() string {
+	return fmt.Sprintf("name: %s, addr: [%s], MD: %X, Services: %v, RSSI: %3d", scanEntry.localName, scanEntry.addr, scanEntry.manufacData, scanEntry.services, scanEntry.rssi)
+}
+
+func (scanEntry *ScanResult) LocalName() string {
+	return scanEntry.localName
+}
+
+func (scanEntry *ScanResult) RSSI() int {
+	return scanEntry.rssi
+>>>>>>> Stashed changes
 }
 
 func SetLogLevelTrace() {
@@ -88,6 +121,10 @@ func (c *Connection) RetryInterval() time.Duration {
 
 func (c *Connection) Receive() <-chan []byte {
 	return c.inbox
+}
+
+func (c *Connection) RSSI() int {
+	return c.rssi
 }
 
 func (c *Connection) flush() bool {
@@ -179,6 +216,10 @@ func NewConnection(ctx context.Context, vin string) (*Connection, error) {
 
 func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 	var err, err2 error
+<<<<<<< Updated upstream
+=======
+	var localName string
+>>>>>>> Stashed changes
 	// We don't want concurrent calls to NewConnection that would defeat
 	// the point of reusing the existing BLE device. Note that this is not
 	// an issue on MacOS, but multiple calls to newDevice() on Linux leads to failures.
@@ -195,11 +236,15 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 		}
 		ble.SetDefaultDevice(device)
 	}
-
-	vinBytes := []byte(vin)
-	digest := sha1.Sum(vinBytes)
-
-	localName := fmt.Sprintf("S%02xC", digest[:8])
+	// check, if localName or VIN was provided
+	if strings.HasPrefix(vin, "S") && strings.HasSuffix(vin, "C") {
+		localName = vin
+	} else {
+		// calculate localName from SHA1 checksum of VIN
+		vinBytes := []byte(vin)
+		digest := sha1.Sum(vinBytes)
+		localName = fmt.Sprintf("S%02xC", digest[:8])
+	}
 	log.Debug("Searching for BLE beacon %s...", localName)
 	canConnect := false
 	filter := func(adv ble.Advertisement) bool {
@@ -264,9 +309,89 @@ func tryToConnect(ctx context.Context, vin string) (*Connection, error) {
 		return nil, fmt.Errorf("ble: failed to subscribe to RX: %s", err)
 	}
 	log.Info("Connected to vehicle BLE")
+<<<<<<< Updated upstream
 	conn.rssi, err2 = client.ReadRSSI()
+=======
+	rssi, err2 := client.ReadRSSI()
+	conn.rssi = int(rssi)
+>>>>>>> Stashed changes
 	if err2 == nil {
 		log.Info("RSSI %ddBm", conn.rssi)
 	}
 	return &conn, nil
+}
+
+func NewScan(ctx context.Context) (*ScanList, error) {
+	var lastError error
+	for {
+		scanList, err := tryToScan(ctx)
+		if err == nil {
+			return scanList, nil
+		}
+		if strings.Contains(err.Error(), "operation not permitted") {
+			return nil, err
+		}
+		log.Info("Finished scanning for BLE beacons: %s", err)
+		if err := ctx.Err(); err != nil {
+			if lastError != nil {
+				return scanList, lastError
+			}
+			return scanList, err
+		}
+		lastError = err
+	}
+}
+
+func tryToScan(ctx context.Context) (*ScanList, error) {
+	var err error
+	// We don't want concurrent calls to NewConnection that would defeat
+	// the point of reusing the existing BLE device. Note that this is not
+	// an issue on MacOS, but multiple calls to newDevice() on Linux leads to failures.
+	mu.Lock()
+	defer mu.Unlock()
+
+	if device != nil {
+		log.Debug("Reusing existing BLE device")
+	} else {
+		log.Debug("Creating new BLE device")
+		device, err = newDevice()
+		if err != nil {
+			return nil, fmt.Errorf("failed to find a BLE device: %s", err)
+		}
+		ble.SetDefaultDevice(device)
+	}
+
+	log.Debug("Searching for BLE beacons...")
+	scanList := ScanList{
+		device: device,
+	}
+	canConnect := false
+	filter := func(adv ble.Advertisement) bool {
+		ln := adv.LocalName()
+		if len(ln) > 0 {
+			log.Debug("Advertisement from Name: %s [%s] RSSI: %3d:", ln, adv.Addr(), adv.RSSI())
+		}
+		if len(ln) != 18 {
+			return false
+		}
+		if strings.HasPrefix(ln, "S") || strings.HasSuffix(ln, "C") {
+			scanResult := ScanResult{
+				localName: ln,
+				addr:      adv.Addr(),
+				rssi:      adv.RSSI(),
+			}
+			canConnect = adv.Connectable()
+			if canConnect {
+				log.Debug("Tesla vehicle found! Services: %v, MD: %X.", adv.Services(), adv.ManufacturerData())
+				scanResult.manufacData = adv.ManufacturerData()
+				scanResult.services = adv.Services()
+			}
+			scanList.scanEntries = append(scanList.scanEntries, scanResult)
+		}
+		return false
+	}
+
+	_, err = ble.Connect(ctx, filter)
+
+	return &scanList, err
 }

@@ -378,6 +378,36 @@ func (c *Config) Connect(ctx context.Context) (acct *account.Account, car *vehic
 	return
 }
 
+// Connect to vehicle.
+//
+// If c.TokenFilename is set, the returned account will not be nil and the vehicle will use a
+// connector.inet connection if a VIN was provided. If no token filename is set, c.VIN is required,
+// the account will be nil, and the vehicle will use a connector.ble connection.
+func (c *Config) ConnectCarLocal(ctx context.Context, localName string) (car *vehicle.Vehicle, err error) {
+	// A private key is required to authorize commands. Load a private key from a file if the caller
+	// provided ones.
+	var skey protocol.ECDHPrivateKey
+
+	c.VIN = localName
+
+	log.Debug("Connecting to car over BLE...")
+	car, err = c.ConnectLocal(ctx, skey)
+	if err != nil {
+		return nil, err
+	}
+
+	if car == nil {
+		// We don't need to connect to car, return early (acct may be non-nil).
+		return
+	}
+
+	log.Info("Connecting to car...")
+	if err := car.Connect(ctx); err != nil {
+		return nil, err
+	}
+	return
+}
+
 func (c *Config) loadCache() error {
 	if c.CacheFilename == "" {
 		return nil
@@ -470,4 +500,15 @@ func (c *Config) ConnectLocal(ctx context.Context, skey protocol.ECDHPrivateKey)
 		return nil, err
 	}
 	return
+}
+
+// Scan scans for BLE advertisements.
+func (c *Config) Scan(ctx context.Context) (scanList *ble.ScanList, err error) {
+	if c.Flags.isSet(FlagBLE) && c.Flags.isSet(FlagVIN) {
+		log.Debug("Scanning over BLE...")
+		scanList, err = ble.NewScan(ctx)
+	} else {
+		err = ErrNoAvailableTransports
+	}
+	return scanList, err
 }

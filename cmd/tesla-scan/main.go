@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -70,8 +69,6 @@ func runCommand(acct *account.Account, car *vehicle.Vehicle, args []string, time
 	if err := execute(ctx, acct, car, args); err != nil {
 		if protocol.MayHaveSucceeded(err) {
 			writeErr("Couldn't verify success: %s", err)
-		} else if errors.Is(err, protocol.ErrNoSession) {
-			writeErr("You must provide a private key with -key-name or -key-file to execute this command")
 		} else {
 			writeErr("Failed to execute command: %s", err)
 		}
@@ -122,9 +119,9 @@ func main() {
 	}
 	flag.Usage = Usage
 	flag.BoolVar(&debug, "debug", false, "Enable verbose debugging messages")
-	flag.BoolVar(&forceBLE, "ble", false, "Force BLE connection even if OAuth environment variables are defined")
 	flag.DurationVar(&commandTimeout, "command-timeout", 5*time.Second, "Set timeout for commands sent to the vehicle.")
 	flag.DurationVar(&connTimeout, "connect-timeout", 20*time.Second, "Set timeout for establishing initial connection.")
+	forceBLE = true
 
 	config.RegisterCommandLineFlags()
 	flag.Parse()
@@ -145,9 +142,8 @@ func main() {
 
 	args := flag.Args()
 	if len(args) > 0 {
-		if args[0] == "help" {
+		if args[0] == "help" || args[0] == "h" {
 			if len(args) == 1 {
-				writeErr("%s - SDK version: %s with rigado-ble/ble (including PR #76). Build on %s with %s architecture on %s.", os.Args[0], version, hwinfo, hwarch, today)
 				Usage()
 				return
 			}
@@ -171,30 +167,52 @@ func main() {
 		writeErr("Error loading credentials: %s", err)
 		return
 	}
+	if flag.NArg() == 0 {
+		writeErr("Command missing.")
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), connTimeout)
 	defer cancel()
 
-	acct, car, err := config.Connect(ctx)
+	scanList, err := config.Scan(ctx)
+	scanEntries := scanList.ScanEntries()
 	if err != nil {
-		writeErr("Error: %s", err)
 		// Error isn't wrapped so we have to check for a substring explicitly.
 		if strings.Contains(err.Error(), "operation not permitted") {
 			// The underlying BLE package calls HCIDEVDOWN on the BLE device, presumably as a
 			// heavy-handed way of dealing with devices that are in a bad state.
 			writeErr("\nTry again after granting this application CAP_NET_ADMIN:\n\n\tsudo setcap 'cap_net_admin=eip' \"$(which %s)\"\n", os.Args[0])
+			return
 		}
-		return
 	}
+	fmt.Printf("{\"scanResults\":[")
+	for i := range scanEntries {
+		if i > 0 {
+			fmt.Printf(",")
+		}
+		fmt.Printf("{\"localName\":\"%s\",\"rssi\":%d,\"response\":", scanEntries[i].LocalName(), scanEntries[i].RSSI())
+		ctx2, cancel2 := context.WithTimeout(context.Background(), connTimeout)
+		car, err := config.ConnectCarLocal(ctx2, scanEntries[i].LocalName())
+		if err != nil {
+			writeErr("error: %s", err)
+			// Error isn't wrapped so we have to check for a substring explicitly.
+			if strings.Contains(err.Error(), "operation not permitted") {
+				// The underlying BLE package calls HCIDEVDOWN on the BLE device, presumably as a
+				// heavy-handed way of dealing with devices that are in a bad state.
+				writeErr("\nTry again after granting this application CAP_NET_ADMIN:\n\n\tsudo setcap 'cap_net_admin=eip' \"$(which %s)\"\n", os.Args[0])
+			}
+			return
+		}
+		cancel2()
 
-	if car != nil {
-		defer car.Disconnect()
-		defer config.UpdateCachedSessions(car)
+		if car != nil {
+			defer car.Disconnect()
+			defer config.UpdateCachedSessions(car)
+		}
+		// print state information
+		status = runCommand(nil, car, flag.Args(), commandTimeout)
+		fmt.Printf("}\n")
 	}
-
-	if flag.NArg() > 0 {
-		status = runCommand(acct, car, flag.Args(), commandTimeout)
-	} else {
-		status = runInteractiveShell(acct, car, commandTimeout)
-	}
+	fmt.Printf("]}")
 }
