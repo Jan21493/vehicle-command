@@ -1,6 +1,6 @@
 Aufbau einer Tesla VIN
 
-LRW3E7FS5PC695355
+LRW3E7FS5PC123456
 LRW: Tesla China
    3: Model 3
     E: Linkslenker, 4 Türen, Limousine (Model 3
