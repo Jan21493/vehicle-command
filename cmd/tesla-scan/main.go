@@ -191,7 +191,7 @@ func main() {
 		if i > 0 {
 			fmt.Printf(",")
 		}
-		fmt.Printf("{\"localName\":\"%s\",\"rssi\":%d,\"response\":", scanEntries[i].LocalName(), scanEntries[i].RSSI())
+		fmt.Printf("{\"localName\":\"%s\",", scanEntries[i].LocalName())
 		ctx2, cancel2 := context.WithTimeout(context.Background(), connTimeout)
 		car, err := config.ConnectCarLocal(ctx2, scanEntries[i].LocalName())
 		if err != nil {

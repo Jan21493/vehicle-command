@@ -1203,7 +1203,7 @@ var commands = map[string]*Command{
 			Argument{name: "CATEGORY", help: "One of " + strings.Join(categoryNames(), ", ")},
 		},
 		optional: []Argument{
-			Argument{name: "OUTPUT", help: "'enums' (default) or 'numbers'"},
+			Argument{name: "OUTPUT", help: "'enums' (default) or 'numbers'."},
 		},
 		handler: func(ctx context.Context, acct *account.Account, car *vehicle.Vehicle, args map[string]string) error {
 			var jsondata string

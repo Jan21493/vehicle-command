@@ -208,7 +208,7 @@ var commands = map[string]*Command{
 				}
 				slot++
 			}
-			fmt.Printf("{\"rssi\":%d,\"keylist\":[", car.RSSI())
+			fmt.Printf("\"rssi\":%d,\"keylist\":[", car.RSSI())
 			for keyno := range keylist {
 				publicKey = keylist[keyno].GetPublicKey().GetPublicKeyRaw()
 				keyRole = fmt.Sprintf("%s", keylist[keyno].GetKeyRole())
@@ -218,7 +218,7 @@ var commands = map[string]*Command{
 				}
 				fmt.Printf("{\"publicKey\":\"%02x\",\"role\":\"%s\",\"formFactor\":\"%s\"}", publicKey, keyRole, keyFormFactor)
 			}
-			fmt.Printf("]}")
+			fmt.Printf("]")
 			return nil
 		},
 	},
@@ -248,7 +248,7 @@ var commands = map[string]*Command{
 				EmitDefaultValues: true,
 			}
 			jsondata = options.Format(info)
-			fmt.Printf("{\"rssi\":%d,\"state\":%s}", car.RSSI(), jsondata)
+			fmt.Printf("\"rssi\":%d,\"state\":%s", car.RSSI(), jsondata)
 			return nil
 		},
 	},
