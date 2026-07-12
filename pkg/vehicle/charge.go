@@ -297,3 +297,35 @@ func (v *Vehicle) ClearScheduledDeparture(ctx context.Context) error {
 			},
 		})
 }
+
+// SetLowPowerMode enables or disables low power mode, which reduces battery consumption. If the
+// vehicle is forced to be in lower power mode due to low battery, this will return a
+// low_power_mode_enforced error.
+func (v *Vehicle) SetLowPowerMode(ctx context.Context, enable bool) error {
+	return v.executeCarServerAction(ctx,
+		&carserver.Action_VehicleAction{
+			VehicleAction: &carserver.VehicleAction{
+				VehicleActionMsg: &carserver.VehicleAction_SetLowPowerModeAction{
+					SetLowPowerModeAction: &carserver.SetLowPowerModeAction{
+						LowPowerMode: enable,
+					},
+				},
+			},
+		})
+}
+
+// SetKeepAccessoryPowerMode enables or disables accessory power mode. Phone chargers, USB ports,
+// and low voltage outlets remain powered after exit until the vehicle enters Low Power Mode. When
+// enabled, this feature consumes additional energy even if no devices are connected.
+func (v *Vehicle) SetKeepAccessoryPowerMode(ctx context.Context, enable bool) error {
+	return v.executeCarServerAction(ctx,
+		&carserver.Action_VehicleAction{
+			VehicleAction: &carserver.VehicleAction{
+				VehicleActionMsg: &carserver.VehicleAction_SetKeepAccessoryPowerModeAction{
+					SetKeepAccessoryPowerModeAction: &carserver.SetKeepAccessoryPowerModeAction{
+						KeepAccessoryPowerMode: enable,
+					},
+				},
+			},
+		})
+}

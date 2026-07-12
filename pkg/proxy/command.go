@@ -69,6 +69,18 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 		return func(v *vehicle.Vehicle) error { return v.SetVolume(ctx, float32(volume)) }, nil
 	case "remote_boombox":
 		return nil, ErrCommandNotImplemented
+	case "media_next_fav":
+		return func(v *vehicle.Vehicle) error { return v.MediaNextFavorite(ctx) }, nil
+	case "media_prev_fav":
+		return func(v *vehicle.Vehicle) error { return v.MediaPreviousFavorite(ctx) }, nil
+	case "media_next_track":
+		return func(v *vehicle.Vehicle) error { return v.MediaNextTrack(ctx) }, nil
+	case "media_prev_track":
+		return func(v *vehicle.Vehicle) error { return v.MediaPreviousTrack(ctx) }, nil
+	case "media_volume_down":
+		return func(v *vehicle.Vehicle) error { return v.VolumeDown(ctx) }, nil
+	case "media_volume_up":
+		return func(v *vehicle.Vehicle) error { return v.VolumeUp(ctx) }, nil
 	case "media_toggle_playback":
 		return func(v *vehicle.Vehicle) error { return v.ToggleMediaPlayback(ctx) }, nil
 	// Climate Controls
@@ -200,7 +212,19 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 		return func(v *vehicle.Vehicle) error { return v.CloseTonneau(ctx) }, nil
 	case "stop_tonneau":
 		return func(v *vehicle.Vehicle) error { return v.StopTonneau(ctx) }, nil
-	// Charging controls
+	// Power-management controls
+	case "set_low_power_mode":
+		on, err := params.getBool("enable", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error { return v.SetLowPowerMode(ctx, on) }, nil
+	case "keep_accessory_power_mode":
+		on, err := params.getBool("enable", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error { return v.SetKeepAccessoryPowerMode(ctx, on) }, nil
 	case "charge_standard":
 		return func(v *vehicle.Vehicle) error { return v.ChargeStandardRange(ctx) }, nil
 	case "charge_start":
@@ -377,6 +401,9 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 		return nil, ErrCommandUseRESTAPI
 	case "set_managed_scheduled_charging_time":
 		return nil, ErrCommandUseRESTAPI
+	case "wake_up":
+		return func(v *vehicle.Vehicle) error { return v.Wakeup(ctx) }, nil
+	// Security
 	case "set_pin_to_drive":
 		on, err := params.getBool("on", true)
 		if err != nil {
@@ -387,9 +414,8 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 			return nil, err
 		}
 		return func(v *vehicle.Vehicle) error { return v.SetPINToDrive(ctx, on, password) }, nil
-	case "wake_up":
-		return func(v *vehicle.Vehicle) error { return v.Wakeup(ctx) }, nil
-	// Security
+	case "clear_pin_to_drive_admin":
+		return func(v *vehicle.Vehicle) error { return v.ClearPINToDrive(ctx) }, nil
 	case "door_lock":
 		return func(v *vehicle.Vehicle) error { return v.Lock(ctx) }, nil
 	case "door_unlock":
@@ -397,7 +423,7 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 	case "erase_user_data":
 		return func(v *vehicle.Vehicle) error { return v.EraseGuestData(ctx) }, nil
 	case "reset_pin_to_drive_pin":
-		return func(v *vehicle.Vehicle) error { return v.ResetPIN(ctx) }, nil
+		return func(v *vehicle.Vehicle) error { return v.ResetPIN(ctx) }, nil //nolint:all
 	case "reset_valet_pin":
 		return func(v *vehicle.Vehicle) error { return v.ResetValetPin(ctx) }, nil
 	case "guest_mode":
@@ -421,7 +447,10 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 		if err != nil {
 			return nil, err
 		}
-		return func(v *vehicle.Vehicle) error { return v.SetValetMode(ctx, on, password) }, nil
+		if on {
+			return func(v *vehicle.Vehicle) error { return v.EnableValetMode(ctx, password) }, nil
+		}
+		return func(v *vehicle.Vehicle) error { return v.DisableValetMode(ctx) }, nil
 	case "set_vehicle_name":
 		name, err := params.getString("vehicle_name", true)
 		if err != nil {
@@ -446,12 +475,50 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 			return nil, err
 		}
 		return func(v *vehicle.Vehicle) error { return v.ClearSpeedLimitPIN(ctx, pin) }, nil
+	case "speed_limit_clear_pin_admin":
+		return func(v *vehicle.Vehicle) error { return v.ClearSpeedLimitPINAdminAction(ctx) }, nil
 	case "speed_limit_set_limit":
 		speedMPH, err := params.getNumber("limit_mph", true)
 		if err != nil {
 			return nil, err
 		}
 		return func(v *vehicle.Vehicle) error { return v.SpeedLimitSetLimitMPH(ctx, speedMPH) }, nil
+	case "parental_controls_activate":
+		pin, err := params.getString("pin", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error { return v.ParentalControlsActivate(ctx, pin) }, nil
+	case "parental_controls_deactivate":
+		pin, err := params.getString("pin", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error { return v.ParentalControlsDeactivate(ctx, pin) }, nil
+	case "parental_controls_enable_setting":
+		settingStr, err := params.getString("setting", true)
+		if err != nil {
+			return nil, err
+		}
+		settingVal, ok := carserver.ParentalControlsEnableSettingsAction_ParentalControlsSetting_E_value[settingStr]
+		if !ok {
+			return nil, &protocol.NominalError{Details: fmt.Errorf("invalid setting: %s", settingStr)}
+		}
+		enable, err := params.getBool("enable", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error {
+			return v.ParentalControlsEnableSetting(ctx, vehicle.ParentalControlsSetting(settingVal), enable)
+		}, nil
+	case "parental_controls_set_speed_limit":
+		limitMPH, err := params.getNumber("limit_mph", true)
+		if err != nil {
+			return nil, err
+		}
+		return func(v *vehicle.Vehicle) error { return v.ParentalControlsSetSpeedLimit(ctx, limitMPH) }, nil
+	case "parental_controls_clear_pin_admin":
+		return func(v *vehicle.Vehicle) error { return v.ParentalControlsClearPIN(ctx) }, nil
 	case "trigger_homelink":
 		lat, err := params.getNumber("lat", true)
 		if err != nil {
@@ -492,7 +559,7 @@ func ExtractCommandAction(ctx context.Context, command string, params RequestPar
 			return nil, errors.New("command must be 'vent' or 'close'")
 		}
 	default:
-		return nil, &inet.HttpError{Code: http.StatusBadRequest, Message: "{\"response\":null,\"error\":\"invalid_command\",\"error_description\":\"\"}"}
+		return nil, &inet.HTTPError{Code: http.StatusBadRequest, Message: "{\"response\":null,\"error\":\"invalid_command\",\"error_description\":\"\"}"}
 	}
 }
 

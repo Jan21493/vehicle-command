@@ -263,9 +263,8 @@ func (v *Vehicle) Send(ctx context.Context, domain universal.Domain, payload []b
 func (v *Vehicle) Wakeup(ctx context.Context) error {
 	if oapi, ok := v.conn.(connector.FleetAPIConnector); ok {
 		return oapi.Wakeup(ctx)
-	} else {
-		return v.wakeupRKE(ctx)
 	}
+	return v.wakeupRKE(ctx)
 }
 
 func (v *Vehicle) UpdateCachedSessions(c *cache.SessionCache) error {

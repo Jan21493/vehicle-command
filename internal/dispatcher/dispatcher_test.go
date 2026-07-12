@@ -249,21 +249,22 @@ func (d *dummyConnector) EnqueueSendError(err error) {
 	d.lock.Unlock()
 }
 
-func (d *dummyConnector) Send(ctx context.Context, buffer []byte) error {
+func (d *dummyConnector) Send(_ context.Context, buffer []byte) error {
 	var message universal.RoutableMessage
 	if !d.AckRequests {
 		return errTimeout
 	}
+	d.lock.Lock()
+	var err error
 	if len(d.errorQueue) > 0 {
-		d.lock.Lock()
-		err := d.errorQueue[0]
+		err = d.errorQueue[0]
 		d.errorQueue = d.errorQueue[1:]
-		d.lock.Unlock()
-		if err == errDropMessage {
-			return nil
-		} else if err != nil {
-			return err
-		}
+	}
+	d.lock.Unlock()
+	if err == errDropMessage {
+		return nil
+	} else if err != nil {
+		return err
 	}
 	if err := proto.Unmarshal(buffer, &message); err != nil {
 		return err
@@ -670,7 +671,7 @@ func TestWaitForAllSessions(t *testing.T) {
 
 	// Configure the Connector to only respond to the first of two handshakes
 	conn.EnqueueSendError(nil)
-	conn.EnqueueSendError(errDropMessage)
+	conn.dropReplies = true
 
 	key, err := authentication.NewECDHPrivateKey(rand.Reader)
 	if err != nil {
@@ -898,7 +899,7 @@ func TestNoValidHandshakeResponse(t *testing.T) {
 	const maxCallbacks = 5
 	callbackCount := 0
 
-	conn.callback = func(d *dummyConnector, message *universal.RoutableMessage) ([]byte, bool) {
+	conn.callback = func(_ *dummyConnector, message *universal.RoutableMessage) ([]byte, bool) {
 		callbackCount++ // caller holds d.lock
 		reply := initReply(message)
 		reply.Payload = &universal.RoutableMessage_SessionInfo{}
@@ -925,6 +926,51 @@ func TestNoValidHandshakeResponse(t *testing.T) {
 
 	if err := dispatcher.StartSession(ctx, testDomain); !errors.Is(err, protocol.ErrKeyNotPaired) {
 		t.Errorf("Expected key not paired but got %s", err)
+	}
+}
+
+func TestRetryNonresponsive(t *testing.T) {
+	// Verifies that the client tries to resend session info requests to non-responsive domains
+	conn := newDummyConnector(t)
+	defer conn.Close()
+
+	key, err := authentication.NewECDHPrivateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dispatcher, err := New(conn, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.Stop()
+
+	const maxCallbacks = 5
+	callbackCount := 0
+
+	conn.callback = func(_ *dummyConnector, _ *universal.RoutableMessage) ([]byte, bool) {
+		t.Log("Received callback")
+		callbackCount++ // caller holds conn.lock
+		if callbackCount >= maxCallbacks {
+			cancel()
+		}
+		return nil, false
+	}
+
+	if err := dispatcher.StartSession(ctx, testDomain); !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected key not paired but got %s", err)
+	}
+
+	conn.lock.Lock()
+	defer conn.lock.Unlock()
+	if callbackCount < maxCallbacks {
+		t.Errorf("Expected %d callbacks, got %d", maxCallbacks, callbackCount)
 	}
 }
 

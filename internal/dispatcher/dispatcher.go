@@ -76,7 +76,7 @@ func (d *Dispatcher) StartSession(ctx context.Context, domain universal.Domain) 
 	d.sessionLock.Lock()
 	s, ok := d.sessions[domain]
 	if !ok {
-		d.sessions[domain], err = NewSession(d.privateKey, d.conn.VIN())
+		d.sessions[domain], err = newSession(d.privateKey, d.conn.VIN())
 		s = d.sessions[domain]
 	} else if s != nil && s.ctx != nil {
 		log.Info("Session for %s loaded from cache", domain)
@@ -87,26 +87,40 @@ func (d *Dispatcher) StartSession(ctx context.Context, domain universal.Domain) 
 		return err
 	}
 	for {
-		recv, err := d.RequestSessionInfo(ctx, domain)
-		if err != nil {
+		if retry, err := d.tryStartSession(ctx, s, domain); !retry {
 			return err
 		}
-		defer recv.Close()
-		select {
-		case reply := <-recv.Recv():
-			if err = protocol.GetError(reply); err != nil {
-				return err
-			}
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-s.readySignal:
-			return nil
+	}
+}
+
+func (d *Dispatcher) tryStartSession(ctx context.Context, s *session, domain universal.Domain) (retry bool, err error) {
+	recv, err := d.RequestSessionInfo(ctx, domain)
+	if err != nil {
+		return false, err
+	}
+	defer recv.Close()
+	// Request sent
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-s.readySignal:
+		return false, nil
+	case <-time.After(d.RetryInterval()):
+		return true, nil
+	case reply := <-recv.Recv():
+		if err = protocol.GetError(reply); err != nil {
+			return false, err
 		}
-		select {
-		case <-time.After(d.conn.RetryInterval()):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+	}
+	// Reply received. Normally, the dispatcher will clear readySignal after processing the reply;
+	// the other branches handle malformed vehicle responses.
+	select {
+	case <-s.readySignal:
+		return false, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(d.RetryInterval()):
+		return true, nil
 	}
 }
 
@@ -189,6 +203,7 @@ func (d *Dispatcher) checkForSessionUpdate(message *universal.RoutableMessage, h
 	tag := message.GetSignatureData().GetSessionInfoTag().GetTag()
 	if tag == nil {
 		log.Warning("[%02x] Discarding unauthenticated session info", message.GetRequestUuid())
+		return
 	}
 	var err error
 
@@ -201,7 +216,7 @@ func (d *Dispatcher) checkForSessionUpdate(message *universal.RoutableMessage, h
 		return
 	}
 
-	if err = session.ProcessHello(message.GetRequestUuid(), sessionInfo, tag); err != nil {
+	if err = session.processHello(message.GetRequestUuid(), sessionInfo, tag); err != nil {
 		log.Warning("[%02x] Session info error: %s", message.GetRequestUuid(), err)
 		return
 	}
@@ -410,7 +425,7 @@ func (d *Dispatcher) Send(ctx context.Context, message *universal.RoutableMessag
 			log.Warning("No session available for %s", message.GetToDestination().GetDomain())
 			return nil, protocol.ErrNoSession
 		}
-		if err := session.Authorize(ctx, message, auth); err != nil {
+		if err := session.authorize(ctx, message, auth); err != nil {
 			return nil, err
 		}
 	}
@@ -501,7 +516,7 @@ func (d *Dispatcher) Cache() []CacheEntry {
 func (d *Dispatcher) LoadCache(entries []CacheEntry) error {
 	sessions := make(map[universal.Domain]*session)
 	for _, entry := range entries {
-		s, err := NewSession(d.privateKey, d.conn.VIN())
+		s, err := newSession(d.privateKey, d.conn.VIN())
 		close(s.readySignal)
 		s.ready = true
 		if err != nil {

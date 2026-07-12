@@ -12,6 +12,7 @@ import (
 
 	"github.com/teslamotors/vehicle-command/internal/authentication"
 	"github.com/teslamotors/vehicle-command/pkg/cli"
+	"github.com/teslamotors/vehicle-command/pkg/sign"
 )
 
 const helpStr = `
@@ -21,7 +22,7 @@ usage: tesla-jws [OPTION...] sign APP [JSON_FILE]
 			Verifies that the signature on JWS_FILE is correct, but does not check that the issuer
 			is trusted or that the audience is correct.
 
-Creates or verifies a JWS (JSON Web Siganture) using Schnorr/P256 signatures. This signature type is
+Creates or verifies a JWS (JSON Web Signature) using Schnorr/P256 signatures. This signature type is
 not part of the JWS standard, but permits clients to safely re-use existing ECDH/P256 keys as
 signing keys.
 
@@ -56,7 +57,7 @@ func usage() {
 	flag.PrintDefaults()
 }
 
-func sign(config *cli.Config, fleet bool) {
+func signConfig(config *cli.Config, fleet bool) {
 	skey, err := config.PrivateKey()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load private key: %s\n", err)
@@ -78,13 +79,13 @@ func sign(config *cli.Config, fleet bool) {
 	}
 	var token string
 	if fleet {
-		token, err = authentication.SignMessageForFleet(skey, application, claims)
+		token, err = sign.SignMessageForFleet(skey, application, claims)
 	} else {
 		if config.VIN == "" {
 			fmt.Fprintln(os.Stderr, "Provide either -vin or -fleet")
 			os.Exit(1)
 		}
-		token, err = authentication.SignMessageForVehicle(skey, config.VIN, application, claims)
+		token, err = sign.SignMessageForVehicle(skey, config.VIN, application, claims)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create JWS: %s\n", err)
@@ -164,7 +165,7 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "sign":
-		sign(config, fleet)
+		signConfig(config, fleet)
 	case "verify":
 		verify()
 	default:

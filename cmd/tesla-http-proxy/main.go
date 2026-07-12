@@ -22,8 +22,8 @@ const (
 )
 
 const (
-	EnvTlsCert = "TESLA_HTTP_PROXY_TLS_CERT"
-	EnvTlsKey  = "TESLA_HTTP_PROXY_TLS_KEY"
+	EnvTLSCert = "TESLA_HTTP_PROXY_TLS_CERT"
+	EnvTLSKey  = "TESLA_HTTP_PROXY_TLS_KEY"
 	EnvHost    = "TESLA_HTTP_PROXY_HOST"
 	EnvPort    = "TESLA_HTTP_PROXY_PORT"
 	EnvTimeout = "TESLA_HTTP_PROXY_TIMEOUT"
@@ -35,7 +35,7 @@ Do not listen on a network interface without adding client authentication. Unaut
 be used to create excessive traffic from your IP address to Tesla's servers, which Tesla may respond
 to by rate limiting or blocking your connections.`
 
-type HttpProxyConfig struct {
+type HTTProxyConfig struct {
 	keyFilename  string
 	certFilename string
 	verbose      bool
@@ -45,7 +45,7 @@ type HttpProxyConfig struct {
 }
 
 var (
-	httpConfig = &HttpProxyConfig{}
+	httpConfig = &HTTProxyConfig{}
 )
 
 func init() {
@@ -69,6 +69,18 @@ func Usage() {
 }
 
 func main() {
+	// ******************************************************************************************
+	// WHY IS THERE NO OPTION FOR DISABLING TLS?
+	// ******************************************************************************************
+	// In the past, we have had problems with third-party applications that made it easy for DIY
+	// enthusiasts to inadvertently expose their vehicles to the public Internet. In order to
+	// protect users who do not understand the risks of disabling TLS, we decided to omit an
+	// --insecure flag or similar.
+	//
+	// Expert users who need to disable TLS can do so without forking this repository by using the
+	// pkg/proxy package, which is agnostic to TLS. This application is a very thin wrapper around
+	// that package.
+
 	config, err := cli.NewConfig(cli.FlagPrivateKey)
 
 	if err != nil {
@@ -86,7 +98,11 @@ func main() {
 	flag.Usage = Usage
 	config.RegisterCommandLineFlags()
 	flag.Parse()
-	readFromEnvironment()
+	err = readFromEnvironment()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading environment: %s\n", err)
+		os.Exit(1)
+	}
 	config.ReadFromEnvironment()
 
 	if httpConfig.verbose {
@@ -110,9 +126,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Generate a new TLS key for this server.")
 			return
 		}
+		log.Debug("Verified that TLS key is not the same as the command-authentication key.")
 	} else {
-		log.Error("Error loading public key: %v", err)
-		return
+		// Discarding the error here is deliberate
+		log.Debug("Verified that TLS key is not a recycled command-authentication key, because it is not NIST P256.")
 	}
 
 	log.Debug("Creating proxy")
@@ -137,11 +154,11 @@ func main() {
 // Values are not overwritten.
 func readFromEnvironment() error {
 	if httpConfig.certFilename == "" {
-		httpConfig.certFilename = os.Getenv(EnvTlsCert)
+		httpConfig.certFilename = os.Getenv(EnvTLSCert)
 	}
 
 	if httpConfig.keyFilename == "" {
-		httpConfig.keyFilename = os.Getenv(EnvTlsKey)
+		httpConfig.keyFilename = os.Getenv(EnvTLSKey)
 	}
 
 	if httpConfig.host == "localhost" {

@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -18,12 +17,12 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/teslamotors/vehicle-command/internal/authentication"
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/account"
 	"github.com/teslamotors/vehicle-command/pkg/cache"
 	"github.com/teslamotors/vehicle-command/pkg/connector/inet"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
+	"github.com/teslamotors/vehicle-command/pkg/sign"
 	"github.com/teslamotors/vehicle-command/pkg/vehicle"
 )
 
@@ -36,7 +35,6 @@ const (
 	MaxAttempts          = 2
 )
 
-var baseDomainRE = regexp.MustCompile(`use base URL: https://([-a-z0-9.]*)`)
 var h2Prefix = "h2=https://"
 
 func getAccount(req *http.Request) (*account.Account, error) {
@@ -112,7 +110,7 @@ func (p *Proxy) unlockVIN(vin string) {
 //
 // Vehicles must have the public part of skey enrolled on their keychains. (This is a
 // command-authentication key, not a TLS key.)
-func New(ctx context.Context, skey protocol.ECDHPrivateKey, cacheSize int) (*Proxy, error) {
+func New(_ context.Context, skey protocol.ECDHPrivateKey, cacheSize int) (*Proxy, error) {
 	return &Proxy{
 		Timeout:    DefaultTimeout,
 		commandKey: skey,
@@ -129,13 +127,13 @@ type Response struct {
 
 type carResponse struct {
 	Result bool   `json:"result"`
-	Reason string `json:"string"`
+	Reason string `json:"reason"`
 }
 
 func writeJSONError(w http.ResponseWriter, code int, err error) {
 	reply := Response{}
 
-	var httpErr *inet.HttpError
+	var httpErr *inet.HTTPError
 	var jsonBytes []byte
 	if errors.As(err, &httpErr) {
 		code = httpErr.Code
@@ -159,8 +157,8 @@ func writeJSONError(w http.ResponseWriter, code int, err error) {
 	if code != http.StatusOK {
 		log.Error("Returning error %s", http.StatusText(code))
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Header().Add("Content-Type", "application/json")
 	jsonBytes = append(jsonBytes, '\n')
 	w.Write(jsonBytes)
 }
@@ -235,7 +233,7 @@ func (p *Proxy) forwardRequest(acct *account.Account, w http.ResponseWriter, req
 
 		limitedReader := &io.LimitedReader{R: result.Body, N: MaxResponseLength + 1}
 		body, err := io.ReadAll(limitedReader)
-		result.Body.Close()
+		_ = result.Body.Close()
 
 		if err != nil {
 			writeJSONError(w, http.StatusBadGateway, err)
@@ -276,7 +274,7 @@ func (p *Proxy) forwardRequest(acct *account.Account, w http.ResponseWriter, req
 			return
 		}
 
-		attempts += 1
+		attempts++
 		if attempts == MaxAttempts {
 			writeJSONError(w, http.StatusBadGateway, protocol.NewError("max retry exhausted", false, false))
 		}
@@ -294,6 +292,11 @@ func (p *Proxy) forwardRequest(acct *account.Account, w http.ResponseWriter, req
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	log.Info("Received %s request for %s", req.Method, req.URL.Path)
+
+	if req.URL.Path == "/health" {
+		p.handleHealthCheck(w, req)
+		return
+	}
 
 	acct, err := getAccount(req)
 	if err != nil {
@@ -333,9 +336,20 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	p.forwardRequest(acct, w, req)
 }
 
+func (p *Proxy) handleHealthCheck(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, nil)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
 func (p *Proxy) handleFleetTelemetryConfig(acct *account.Account, w http.ResponseWriter, req *http.Request) {
 	log.Info("Processing fleet telemetry configuration...")
-	defer req.Body.Close()
+	defer func() {
+		_ = req.Body.Close()
+	}()
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, fmt.Errorf("could not read request body: %s", err))
@@ -357,7 +371,7 @@ func (p *Proxy) handleFleetTelemetryConfig(acct *account.Account, w http.Respons
 	if _, ok := params.Config["iss"]; ok {
 		log.Warning("Configuration 'iss' field will be overwritten")
 	}
-	token, err := authentication.SignMessageForFleet(p.commandKey, "TelemetryClient", params.Config)
+	token, err := sign.SignMessageForFleet(p.commandKey, "TelemetryClient", params.Config)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, fmt.Errorf("error signing configuration: %s", err))
 		return
@@ -413,7 +427,9 @@ func (p *Proxy) handleVehicleCommand(acct *account.Account, w http.ResponseWrite
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return err
 	}
-	defer car.UpdateCachedSessions(p.sessions)
+	defer func() {
+		_ = car.UpdateCachedSessions(p.sessions)
+	}()
 
 	if err = commandToExecuteFunc(car); err == ErrCommandUseRESTAPI {
 		return err
@@ -427,7 +443,8 @@ func (p *Proxy) handleVehicleCommand(acct *account.Account, w http.ResponseWrite
 		return err
 	}
 
-	w.Header().Add("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "{\"response\":{\"result\":true,\"reason\":\"\"}}")
 	return nil
 }
@@ -460,11 +477,11 @@ func extractCommandAction(ctx context.Context, req *http.Request, command string
 	var params RequestParameters
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
-		return nil, &inet.HttpError{Code: http.StatusBadRequest, Message: "could not read request body"}
+		return nil, &inet.HTTPError{Code: http.StatusBadRequest, Message: "could not read request body"}
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &params); err != nil {
-			return nil, &inet.HttpError{Code: http.StatusBadRequest, Message: "error occurred while parsing request parameters"}
+			return nil, &inet.HTTPError{Code: http.StatusBadRequest, Message: "error occurred while parsing request parameters"}
 		}
 	}
 
