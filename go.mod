@@ -10,11 +10,7 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	golang.org/x/term v0.15.0
 	google.golang.org/protobuf v1.34.2
-)
-
-require (
-	github.com/go-ble/ble v0.0.0-20240122180141-8c5522f54333
-	github.com/rigado/ble v0.6.17
+	github.com/rigado/ble v0.0.0-20251119182813-bac190be7df4
 )
 
 require (
