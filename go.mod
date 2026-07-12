@@ -43,4 +43,4 @@ require (
 
 replace github.com/JuulLabs-OSS/cbgo => github.com/tinygo-org/cbgo v0.0.4
 
-replace github.com/rigado/ble => /opt/loxberry/jan21493/ble
+// replace github.com/rigado/ble => /opt/loxberry/jan21493/ble
