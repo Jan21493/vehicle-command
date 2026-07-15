@@ -69,6 +69,13 @@ type ScanResult struct {
 	rssi        int
 }
 
+type VehicleScanResult struct {
+	Address     string
+	LocalName   string
+	RSSI        int16
+	Connectable bool
+}
+
 func (scanList *ScanList) ScanEntries() []ScanResult {
 	return scanList.scanEntries
 }
@@ -86,31 +93,31 @@ func (scanEntry *ScanResult) RSSI() int {
 }
 
 func SetLogLevelTrace() {
-	ble.SetLogLevelTrace()
+	log.SetLevel(log.LevelDebug)
 }
 
 func SetLogLevelDebug() {
-	ble.SetLogLevelDebug()
+	log.SetLevel(log.LevelDebug)
 }
 
 func SetLogLevelInfo() {
-	ble.SetLogLevelInfo()
+	log.SetLevel(log.LevelInfo)
 }
 
 func SetLogLevelWarn() {
-	ble.SetLogLevelWarn()
+	log.SetLevel(log.LevelWarning)
 }
 
 func SetLogLevelError() {
-	ble.SetLogLevelError()
+	log.SetLevel(log.LevelError)
 }
 
 func SetLogLevelFatal() {
-	ble.SetLogLevelFatal()
+	log.SetLevel(log.LevelError)
 }
 
 func SetLogLevelPanic() {
-	ble.SetLogLevelPanic()
+	log.SetLevel(log.LevelError)
 }
 
 func (c *Connection) PreferredAuthMethod() connector.AuthMethod {
@@ -246,15 +253,8 @@ func initAdapter(id *string) error {
 	return nil
 }
 
-type ScanResult struct {
-	Address     string
-	LocalName   string
-	RSSI        int16
-	Connectable bool
-}
-
-func advertisementToScanResult(a ble.Advertisement) *ScanResult {
-	return &ScanResult{
+func advertisementToScanResult(a ble.Advertisement) *VehicleScanResult {
+	return &VehicleScanResult{
 		Address:     a.Addr().String(),
 		LocalName:   a.LocalName(),
 		RSSI:        int16(a.RSSI()),
@@ -262,7 +262,7 @@ func advertisementToScanResult(a ble.Advertisement) *ScanResult {
 	}
 }
 
-func ScanVehicleBeacon(ctx context.Context, vin string) (*ScanResult, error) {
+func ScanVehicleBeacon(ctx context.Context, vin string) (*VehicleScanResult, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -277,7 +277,7 @@ func ScanVehicleBeacon(ctx context.Context, vin string) (*ScanResult, error) {
 	return a, nil
 }
 
-func scanVehicleBeacon(ctx context.Context, localName string) (*ScanResult, error) {
+func scanVehicleBeacon(ctx context.Context, localName string) (*VehicleScanResult, error) {
 	var err error
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -321,7 +321,7 @@ func NewConnection(ctx context.Context, vin string) (*Connection, error) {
 
 // NewConnectionFromScanResult creates a new BLE connection to the given target.
 // If target is nil, the vehicle will be scanned for.
-func NewConnectionFromScanResult(ctx context.Context, vin string, target *ScanResult) (*Connection, error) {
+func NewConnectionFromScanResult(ctx context.Context, vin string, target *VehicleScanResult) (*Connection, error) {
 	var lastError error
 	for {
 		conn, retry, err := tryToConnect(ctx, vin, target)
@@ -342,7 +342,7 @@ func NewConnectionFromScanResult(ctx context.Context, vin string, target *ScanRe
 	}
 }
 
-func tryToConnect(ctx context.Context, vin string, target *ScanResult) (*Connection, bool, error) {
+func tryToConnect(ctx context.Context, vin string, target *VehicleScanResult) (*Connection, bool, error) {
 	var err, err2 error
 	var localName string
 	// We don't want concurrent calls to NewConnection that would defeat
@@ -355,7 +355,13 @@ func tryToConnect(ctx context.Context, vin string, target *ScanResult) (*Connect
 		return nil, false, err
 	}
 
-	localName := VehicleLocalName(vin)
+	// vin may either be a true VIN or already a BLE local name (S...C).
+	// Derive the beacon local name before scanning so we scan for the correct target.
+	if strings.HasPrefix(vin, "S") && strings.HasSuffix(vin, "C") {
+		localName = vin
+	} else {
+		localName = VehicleLocalName(vin)
+	}
 
 	if target == nil {
 		target, err = scanVehicleBeacon(ctx, localName)
@@ -363,31 +369,8 @@ func tryToConnect(ctx context.Context, vin string, target *ScanResult) (*Connect
 			return nil, true, fmt.Errorf("ble: failed to scan for %s: %s", vin, err)
 		}
 	}
-	// check, if localName or VIN was provided
-	if strings.HasPrefix(vin, "S") && strings.HasSuffix(vin, "C") {
-		localName = vin
-	} else {
-		// calculate localName from SHA1 checksum of VIN
-		vinBytes := []byte(vin)
-		digest := sha1.Sum(vinBytes)
-		localName = fmt.Sprintf("S%02xC", digest[:8])
-	}
+
 	log.Debug("Searching for BLE beacon %s...", localName)
-	canConnect := false
-	filter := func(adv ble.Advertisement) bool {
-		ln := adv.LocalName()
-		if len(ln) > 0 {
-			log.Debug("Advertisement from Name: %s [%s] RSSI: %3d:", ln, adv.Addr(), adv.RSSI())
-		}
-		if ln != localName {
-			return false
-		}
-		canConnect = adv.Connectable()
-		if canConnect {
-			log.Debug("Connectable! Services: %v, MD: %X.", adv.Services(), adv.ManufacturerData())
-		}
-		return true
-	}
 
 	if target.LocalName != localName {
 		return nil, false, fmt.Errorf("ble: beacon with unexpected local name: '%s'", target.LocalName)
@@ -456,7 +439,7 @@ func tryToConnect(ctx context.Context, vin string, target *ScanResult) (*Connect
 	if err2 == nil {
 		log.Info("RSSI %ddBm", conn.rssi)
 	}
-	return &conn, false,nil
+	return &conn, false, nil
 }
 
 func NewScan(ctx context.Context) (*ScanList, error) {

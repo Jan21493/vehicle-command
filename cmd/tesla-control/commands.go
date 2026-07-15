@@ -1032,7 +1032,7 @@ var commands = map[string]*Command{
 		optional: []Argument{
 			Argument{name: "OUTPUT", help: "'enums' or 'numbers' (default)."},
 		},
-		handler: func(ctx context.Context, _ *account.Account, car *vehicle.Vehicle, _ map[string]string) error {
+		handler: func(ctx context.Context, _ *account.Account, car *vehicle.Vehicle, args map[string]string) error {
 			var jsondata string
 			info, err := car.BodyControllerState(ctx)
 			if err != nil {

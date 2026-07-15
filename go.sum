@@ -59,6 +59,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/raff/goble v0.0.0-20190909174656-72afc67d6a99 h1:JtoVdxWJ3tgyqtnPq3r4hJ9aULcIDDnPXBWxZsdmqWU=
 github.com/raff/goble v0.0.0-20190909174656-72afc67d6a99/go.mod h1:CxaUhijgLFX0AROtH5mluSY71VqpjQBw9JXE2UKZmc4=
+github.com/rigado/ble v0.0.0-20251119182813-bac190be7df4 h1:OgTOGNflTz0khCQ6kvaNyhlI2gLklAgdWc/cloFxxiA=
+github.com/rigado/ble v0.0.0-20251119182813-bac190be7df4/go.mod h1:3dxxAS95dGkQ29/+i7OAIzjBduTuROP6+OqyCBD6zG0=
 github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/shurcooL/sanitized_anchor_name v1.0.0/go.mod h1:1NzhyTcUVG4SuEtjjoZeVRXNmyL/1OwPU0+IJeTBvfc=
 github.com/sirupsen/logrus v1.4.2/go.mod h1:tLMulIdttU9McNUspp0xgXVQah82FyeX6MwdIuYE2rE=
