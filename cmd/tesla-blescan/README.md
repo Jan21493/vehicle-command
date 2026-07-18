@@ -14,20 +14,41 @@ You may also run `go install` to place `tesla-blescan` in your GOBIN directory.
 
 ## Key management
 
-This application only uses the 'body-controller-state' command that does not 
-require any authentication or access to a private key.
+This application only supports the 'body-controller-state' and 'list-keys' commands, as they operate without requiring authentication or private key access.
 
 ## Scanning for Tesla vehicles nearby
 
 To scan for Tesla vehicles in BLE range simply run:
 
 ```
-tesla-blescan 
+tesla-blescan body-controller-state
+{"scanResults":[{"localName":"S907xxxxxxxxxxxxbC","rssi":-79,"state":{"vehicleLockState":1, "vehicleSleepStatus":2, "userPresence":1}}
 ```
 
-Run `tesla-blescan -h` to see a full list of supported commands.
+'localName' is a local name used in BLE communication and explained in the tesla-control utility.
 
-Here's an example of an output (using jq - json query, a tool to filter, parse, format and transform json queries):
+The following examples are using jq - json query, a tool to filter, parse, format and transform json queries.
+
+```
+tesla-blescan body-controller-state enums | jq
+{
+  "scanResults": [
+    {
+      "localName": "S907xxxxxxxxxxxxbC",
+      "rssi": -86,
+      "state": {
+        "vehicleLockState": "VEHICLELOCKSTATE_LOCKED",
+        "vehicleSleepStatus": "VEHICLE_SLEEP_STATUS_ASLEEP",
+        "userPresence": "VEHICLE_USER_PRESENCE_NOT_PRESENT"
+      }
+    }
+  ]
+}
+```
+
+Run `tesla-blescan -h` to see a full list of supported commands and options.
+
+Here's an example of the 'list-keys' command:
 
 ```
  tesla-blescan list-keys | jq
