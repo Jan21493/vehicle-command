@@ -6,6 +6,7 @@ package vehicle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 	carserver "github.com/teslamotors/vehicle-command/pkg/protocol/protobuf/carserver"
 	universal "github.com/teslamotors/vehicle-command/pkg/protocol/protobuf/universalmessage"
+	"github.com/teslamotors/vehicle-command/pkg/protocol/protobuf/vcsec"
 )
 
 func (v *Vehicle) getCarServerResponse(ctx context.Context, action *carserver.Action_VehicleAction) (*carserver.Response, error) {
@@ -26,7 +28,7 @@ func (v *Vehicle) getCarServerResponse(ctx context.Context, action *carserver.Ac
 	}
 	responsePayload, err := v.Send(ctx, universal.Domain_DOMAIN_INFOTAINMENT, encodedPayload, v.authMethod)
 	if err != nil {
-		return nil, err
+		return nil, v.classifyInfotainmentSleepError(ctx, err)
 	}
 
 	var response carserver.Response
@@ -42,6 +44,25 @@ func (v *Vehicle) getCarServerResponse(ctx context.Context, action *carserver.Ac
 		return nil, &protocol.NominalError{Details: protocol.NewError("car could not execute command: "+description, false, false)}
 	}
 	return &response, nil
+}
+
+func (v *Vehicle) classifyInfotainmentSleepError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !protocol.Temporary(err) && !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	probeCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	status, statusErr := v.BodyControllerState(probeCtx)
+	if statusErr != nil {
+		return err
+	}
+	if status.GetVehicleSleepStatus() == vcsec.VehicleSleepStatus_E_VEHICLE_SLEEP_STATUS_ASLEEP {
+		return protocol.NewError("vehicle infotainment is asleep; this BLE command requires the vehicle to be awake", false, false)
+	}
+	return err
 }
 
 func (v *Vehicle) executeCarServerAction(ctx context.Context, action *carserver.Action_VehicleAction) error {

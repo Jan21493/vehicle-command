@@ -108,6 +108,9 @@ func main() {
 	defer func() {
 		os.Exit(status)
 	}()
+	defer func() {
+		_ = ble.CloseAdapter()
+	}()
 
 	var (
 		debug          bool

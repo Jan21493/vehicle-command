@@ -419,6 +419,34 @@ func (c *Config) ConnectCarLocal(ctx context.Context, localName string) (car *ve
 	return
 }
 
+func (c *Config) ConnectCarLocalWithScanResult(ctx context.Context, target *ble.VehicleScanResult) (car *vehicle.Vehicle, err error) {
+	var skey protocol.ECDHPrivateKey
+
+	c.VIN = target.LocalName
+
+	log.Debug("Connecting to car over BLE with cached scan result...")
+	err = ble.InitAdapterWithID(c.BtAdapterID)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := ble.NewConnectionFromScanResult(ctx, c.VIN, target)
+	if err != nil {
+		return nil, err
+	}
+
+	car, err = vehicle.NewVehicle(conn, skey, c.sessions)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info("Connecting to car...")
+	if err := car.Connect(ctx); err != nil {
+		return nil, err
+	}
+	return
+}
+
 func (c *Config) loadCache() error {
 	if c.CacheFilename == "" {
 		return nil

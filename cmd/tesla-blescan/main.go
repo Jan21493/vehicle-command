@@ -105,6 +105,9 @@ func main() {
 	defer func() {
 		os.Exit(status)
 	}()
+	defer func() {
+		_ = ble.CloseAdapter()
+	}()
 
 	var (
 		debug          bool
@@ -187,13 +190,21 @@ func main() {
 		}
 	}
 	fmt.Printf("{\"scanResults\":[")
+	seenLocalNames := make(map[string]struct{}, len(scanEntries))
+	firstResult := true
 	for i := range scanEntries {
-		if i > 0 {
+		localName := scanEntries[i].LocalName()
+		if _, seen := seenLocalNames[localName]; seen {
+			continue
+		}
+		seenLocalNames[localName] = struct{}{}
+		if !firstResult {
 			fmt.Printf(",")
 		}
-		fmt.Printf("{\"localName\":\"%s\",", scanEntries[i].LocalName())
+		firstResult = false
+		fmt.Printf("{\"localName\":\"%s\",", localName)
 		ctx2, cancel2 := context.WithTimeout(context.Background(), connTimeout)
-		car, err := config.ConnectCarLocal(ctx2, scanEntries[i].LocalName())
+		car, err := config.ConnectCarLocalWithScanResult(ctx2, scanEntries[i].VehicleScanResult())
 		if err != nil {
 			writeErr("error: %s", err)
 			// Error isn't wrapped so we have to check for a substring explicitly.
@@ -207,11 +218,13 @@ func main() {
 		cancel2()
 
 		if car != nil {
-			defer car.Disconnect()
-			defer config.UpdateCachedSessions(car)
+			config.UpdateCachedSessions(car)
 		}
 		// print state information
 		status = runCommand(nil, car, flag.Args(), commandTimeout)
+		if car != nil {
+			car.Disconnect()
+		}
 		fmt.Printf("}\n")
 	}
 	fmt.Printf("]}")

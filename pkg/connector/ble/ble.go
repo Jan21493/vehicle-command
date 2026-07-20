@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,8 @@ var (
 	mu     sync.Mutex
 )
 
+var vehicleLocalNamePattern = regexp.MustCompile(`^S[0-9A-Fa-f]{16}C$`)
+
 type Connection struct {
 	vin         string
 	inbox       chan []byte
@@ -67,6 +70,7 @@ type ScanResult struct {
 	manufacData []byte
 	services    []ble.UUID
 	rssi        int
+	connectable bool
 }
 
 type VehicleScanResult struct {
@@ -90,6 +94,15 @@ func (scanEntry *ScanResult) LocalName() string {
 
 func (scanEntry *ScanResult) RSSI() int {
 	return scanEntry.rssi
+}
+
+func (scanEntry *ScanResult) VehicleScanResult() *VehicleScanResult {
+	return &VehicleScanResult{
+		Address:     scanEntry.addr.String(),
+		LocalName:   scanEntry.localName,
+		RSSI:        int16(scanEntry.rssi),
+		Connectable: scanEntry.connectable,
+	}
 }
 
 func SetLogLevelTrace() {
@@ -208,6 +221,11 @@ func VehicleLocalName(vin string) string {
 	return fmt.Sprintf("S%02xC", digest[:8])
 }
 
+// IsVehicleLocalName reports whether s matches Tesla BLE local name format.
+func IsVehicleLocalName(s string) bool {
+	return vehicleLocalNamePattern.MatchString(s)
+}
+
 // InitAdapterWithID initializes the BLE adapter with the given ID.
 // Currently this is only supported on Linux. It is not necessary to
 // call this function if using the default adapter, but if not, it
@@ -244,10 +262,21 @@ func initAdapter(id *string) error {
 	if device != nil {
 		log.Debug("Reusing existing BLE device")
 	} else {
-		log.Debug("Creating new BLE adapter")
-		device, err = newAdapter(id)
-		if err != nil {
-			return fmt.Errorf("ble: failed to enable device: %s", err)
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt == 0 {
+				log.Debug("Creating new BLE adapter")
+			} else {
+				log.Debug("Retrying BLE adapter creation (attempt %d/3)", attempt+1)
+			}
+
+			device, err = newAdapter(id)
+			if err == nil {
+				break
+			}
+			if !strings.Contains(err.Error(), "device or resource busy") || attempt == 2 {
+				return fmt.Errorf("ble: failed to enable device: %s", err)
+			}
+			time.Sleep(time.Second)
 		}
 	}
 	return nil
@@ -357,7 +386,7 @@ func tryToConnect(ctx context.Context, vin string, target *VehicleScanResult) (*
 
 	// vin may either be a true VIN or already a BLE local name (S...C).
 	// Derive the beacon local name before scanning so we scan for the correct target.
-	if strings.HasPrefix(vin, "S") && strings.HasSuffix(vin, "C") {
+	if IsVehicleLocalName(vin) {
 		localName = vin
 	} else {
 		localName = VehicleLocalName(vin)
@@ -368,6 +397,8 @@ func tryToConnect(ctx context.Context, vin string, target *VehicleScanResult) (*
 		if err != nil {
 			return nil, true, fmt.Errorf("ble: failed to scan for %s: %s", vin, err)
 		}
+		// Give slower controllers a brief moment to leave scan mode before dialing.
+		time.Sleep(1 * time.Second)
 	}
 
 	log.Debug("Searching for BLE beacon %s...", localName)
@@ -486,33 +517,35 @@ func tryToScan(ctx context.Context) (*ScanList, error) {
 	scanList := ScanList{
 		device: device,
 	}
-	canConnect := false
-	filter := func(adv ble.Advertisement) bool {
+	ctx2, cancel := context.WithCancel(ctx)
+	defer cancel()
+	handler := func(adv ble.Advertisement) {
 		ln := adv.LocalName()
 		if len(ln) > 0 {
 			log.Debug("Advertisement from Name: %s [%s] RSSI: %3d:", ln, adv.Addr(), adv.RSSI())
 		}
 		if len(ln) != 18 {
-			return false
+			return
 		}
 		if strings.HasPrefix(ln, "S") || strings.HasSuffix(ln, "C") {
 			scanResult := ScanResult{
 				localName: ln,
 				addr:      adv.Addr(),
 				rssi:      adv.RSSI(),
+				connectable: adv.Connectable(),
 			}
-			canConnect = adv.Connectable()
-			if canConnect {
+			if adv.Connectable() {
 				log.Debug("Tesla vehicle found! Services: %v, MD: %X.", adv.Services(), adv.ManufacturerData())
 				scanResult.manufacData = adv.ManufacturerData()
 				scanResult.services = adv.Services()
 			}
 			scanList.scanEntries = append(scanList.scanEntries, scanResult)
 		}
-		return false
 	}
 
-	_, err = ble.Connect(ctx, filter)
+	if err = device.Scan(ctx2, false, handler); !errors.Is(err, context.Canceled) {
+		return &scanList, err
+	}
 
 	return &scanList, err
 }
