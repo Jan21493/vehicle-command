@@ -408,7 +408,8 @@ func tryToConnect(ctx context.Context, vin string, target *VehicleScanResult) (*
 	}
 
 	if !target.Connectable {
-		return nil, false, ErrMaxConnectionsExceeded
+		// The vehicle is already connected to the maximum number of BLE devices.
+		return nil, true, ErrMaxConnectionsExceeded
 	}
 
 	log.Debug("Dialing to %s (%s)...", target.Address, localName)
