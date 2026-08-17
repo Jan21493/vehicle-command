@@ -15,6 +15,7 @@ import (
 	debugger "github.com/teslamotors/vehicle-command/internal/log"
 
 	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble/goble"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 	"github.com/teslamotors/vehicle-command/pkg/vehicle"
 )
@@ -48,15 +49,16 @@ func main() {
 		debugger.SetLevel(debugger.LevelDebug)
 	}
 
-	err := ble.InitAdapterWithID(btAdapter)
+	adapter, err := goble.NewAdapter(btAdapter)
 	if err != nil {
-		if ble.IsAdapterError(err) {
-			logger.Print(ble.AdapterErrorHelpMessage(err))
+		if goble.IsAdapterError(err) {
+			logger.Print(goble.AdapterErrorHelpMessage(err))
 		} else {
 			logger.Printf("Failed to initialize BLE adapter: %s", err)
 		}
 		return
 	}
+	defer adapter.Close()
 
 	if vin == "" {
 		logger.Printf("Must specify VIN")
@@ -68,7 +70,7 @@ func main() {
 		defer cancel()
 		doneChan := make(chan struct{})
 		go func() {
-			_, err := ble.ScanVehicleBeacon(ctx, vin)
+			_, err := ble.ScanVehicleBeacon(ctx, vin, adapter)
 			if err != nil && ctx.Err() == nil {
 				logger.Printf("Scan failed: %s", err)
 			} else if ctx.Err() == nil {
@@ -105,14 +107,14 @@ func main() {
 		}
 	}
 
-	scan, err := ble.ScanVehicleBeacon(ctx, vin)
+	beacon, err := ble.ScanVehicleBeacon(ctx, vin, adapter)
 	if err != nil {
 		logger.Println(err)
 		return
 	}
-	logger.Printf("Found vehicle: %s (%s) %ddBm", scan.LocalName, scan.Address, scan.RSSI)
+	logger.Printf("Found vehicle: %s (%s) %ddBm", beacon.LocalName, beacon.Address, beacon.RSSI)
 
-	conn, err := ble.NewConnectionFromScanResult(ctx, vin, scan)
+	conn, err := ble.NewConnectionFromBeacon(ctx, vin, beacon, adapter)
 	if err != nil {
 		logger.Printf("Failed to connect to vehicle: %s", err)
 		return

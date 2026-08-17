@@ -17,6 +17,7 @@ import (
 	"github.com/teslamotors/vehicle-command/pkg/account"
 	"github.com/teslamotors/vehicle-command/pkg/cli"
 	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble/goble"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 	"github.com/teslamotors/vehicle-command/pkg/vehicle"
 )
@@ -179,8 +180,8 @@ func main() {
 
 	acct, car, err := config.Connect(ctx)
 	if err != nil {
-		if ble.IsAdapterError(err) {
-			writeErr("%s", ble.AdapterErrorHelpMessage(err))
+		if goble.IsAdapterError(err) {
+			writeErr("%s", goble.AdapterErrorHelpMessage(err))
 		} else {
 			writeErr("Error: %s", err)
 		}
