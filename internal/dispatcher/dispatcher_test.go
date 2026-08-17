@@ -254,17 +254,20 @@ func (d *dummyConnector) Send(_ context.Context, buffer []byte) error {
 	if !d.AckRequests {
 		return errTimeout
 	}
+
 	d.lock.Lock()
-	var err error
+	defer d.lock.Unlock()
+
 	if len(d.errorQueue) > 0 {
-		err = d.errorQueue[0]
+		err := d.errorQueue[0]
 		d.errorQueue = d.errorQueue[1:]
-	}
-	d.lock.Unlock()
-	if err == errDropMessage {
-		return nil
-	} else if err != nil {
-		return err
+
+		if errors.Is(err, errDropMessage) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if err := proto.Unmarshal(buffer, &message); err != nil {
 		return err
