@@ -69,6 +69,7 @@ func main() {
 		logger.Printf("Failed to initialize BLE adapter: %s", err)
 		return
 	}
+	defer adapter.Close()
 
 	if vin == "" {
 		logger.Printf("Must specify VIN")

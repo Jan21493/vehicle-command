@@ -3,7 +3,7 @@ package goble
 import (
 	"errors"
 
-	"github.com/zlymeda/go-ble"
+	"github.com/rigado/ble"
 )
 
 func IsAdapterError(_ error) bool {

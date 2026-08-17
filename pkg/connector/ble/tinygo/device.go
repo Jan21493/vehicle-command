@@ -21,7 +21,7 @@ func (c *device) Service(_ context.Context, uuid string) (ble.Service, error) {
 		return nil, fmt.Errorf("ble: failed to discover service")
 	}
 
-	return &service{client: c.client, service: services[0]}, nil
+	return &service{client: c.client, svc: services[0]}, nil
 }
 
 func (c *device) Close() error {

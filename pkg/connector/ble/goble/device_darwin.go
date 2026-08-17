@@ -1,6 +1,8 @@
 package goble
 
 import (
+	"github.com/rigado/ble"
+	"github.com/rigado/ble/darwin"
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/zlymeda/go-ble"
 	"github.com/zlymeda/go-ble/darwin"

@@ -14,6 +14,7 @@ import (
 
 var ErrAdapterInvalidID = protocol.NewError("the bluetooth adapter ID is invalid", false, false)
 
+// NewAdapter creates a new BLE adapter using the tinygo/x/bluetooth library.
 func NewAdapter(id string) (ble.Adapter, error) {
 	device, err := newAdapter(id)
 	if err != nil {
@@ -71,7 +72,37 @@ func (s *adapter) ScanBeacon(ctx context.Context, name string) (*ble.Beacon, err
 		return nil, scanCtx.Err()
 	}
 
-	return result, err
+	return result, nil
+}
+
+func (s *adapter) ScanAll(ctx context.Context, handler func(*ble.Beacon)) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	stopScan := func() {
+		err := s.device.StopScan()
+		if err != nil {
+			if strings.Contains(err.Error(), "no scan in progress") {
+				return
+			}
+			log.Warning("ble: failed to stop scan: %+v", err)
+		}
+	}
+
+	go func() {
+		<-ctx.Done()
+		stopScan()
+	}()
+
+	err := s.device.Scan(func(_ *bluetooth.Adapter, a bluetooth.ScanResult) {
+		handler(advertisementToBeacon(a))
+	})
+
+	if err != nil && strings.Contains(err.Error(), "no scan in progress") {
+		return nil
+	}
+	return err
 }
 
 func (s *adapter) Connect(ctx context.Context, beacon *ble.Beacon) (ble.Device, error) {
@@ -104,9 +135,10 @@ func (s *adapter) Close() error {
 
 func advertisementToBeacon(result bluetooth.ScanResult) *ble.Beacon {
 	return &ble.Beacon{
-		Address:     result.Address.String(),
-		LocalName:   result.LocalName(),
-		RSSI:        result.RSSI,
+		Address:   result.Address.String(),
+		LocalName: result.LocalName(),
+		RSSI:      result.RSSI,
+		// tinygo/x/bluetooth does not expose the connectable PDU type; default to true.
 		Connectable: true,
 	}
 }

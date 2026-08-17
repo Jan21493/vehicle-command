@@ -19,6 +19,7 @@ func Example() {
 	if err != nil {
 		panic(err)
 	}
+	defer adapter.Close()
 
 	conn, err := ble.NewConnection(context.Background(), "myvin123", adapter)
 	if err != nil {

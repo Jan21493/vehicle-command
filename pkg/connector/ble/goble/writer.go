@@ -1,10 +1,10 @@
 package goble
 
-import "github.com/zlymeda/go-ble"
+import rigado "github.com/rigado/ble"
 
 type writer struct {
-	characteristic *ble.Characteristic
-	client         ble.Client
+	characteristic *rigado.Characteristic
+	client         rigado.Client
 }
 
 func (w *writer) Write(bytes []byte) (int, error) {
@@ -12,8 +12,7 @@ func (w *writer) Write(bytes []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-
-	return len(bytes), err
+	return len(bytes), nil
 }
 
 func (w *writer) MTU(rxMTU int) (txMTU int, err error) {

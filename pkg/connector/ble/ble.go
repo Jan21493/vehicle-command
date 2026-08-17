@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,16 +13,14 @@ import (
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 )
 
-var (
-	ErrMaxConnectionsExceeded = protocol.NewError("the vehicle is already connected to the maximum number of BLE devices", false, false)
-)
+var ErrMaxConnectionsExceeded = protocol.NewError("the vehicle is already connected to the maximum number of BLE devices", false, false)
 
 const (
 	defaultMTU        = 23
 	maxBLEMTUSize     = 512 + 3
 	maxBLEMessageSize = 1024
 
-	rxTimeout  = time.Second     // Timeout interval between receiving chunks of a mesasge
+	rxTimeout  = time.Second     // Timeout interval between receiving chunks of a message
 	maxLatency = 4 * time.Second // Max allowed error when syncing vehicle clock
 )
 
@@ -33,52 +30,33 @@ const (
 	fromVehicleUUID    = "00000213-b2d1-43f0-9b88-960cebf8b91e"
 )
 
-func VehicleLocalName(vin string) string {
-	vinBytes := []byte(vin)
-	digest := sha1.Sum(vinBytes)
-	return fmt.Sprintf("S%02xC", digest[:8])
-}
-
-// IsVehicleLocalName reports whether s matches Tesla BLE local name format.
-func IsVehicleLocalName(s string) bool {
-	return vehicleLocalNamePattern.MatchString(s)
-}
-
 var vehicleLocalNamePattern = regexp.MustCompile(`^S[0-9A-Fa-f]{16}C$`)
 
+// Connection implements connector.Connector over BLE.
 type Connection struct {
 	vin    string
 	inbox  chan []byte
 	device Device
 	writer Writer
+	rssi   int
 
 	blockLength int
 	inputBuffer []byte
 	lastRx      time.Time
 	lock        sync.Mutex
-	device      ble.Device
-	rssi        int
 }
 
-type ScanList struct {
-	scanEntries []ScanResult
-	device      ble.Device
-}
-
+// ScanResult holds the details of a single BLE scan entry from tesla-blescan.
 type ScanResult struct {
 	localName   string
-	addr        ble.Addr
-	manufacData []byte
-	services    []ble.UUID
+	addr        string
 	rssi        int
 	connectable bool
 }
 
-type VehicleScanResult struct {
-	Address     string
-	LocalName   string
-	RSSI        int16
-	Connectable bool
+// ScanList holds the results of a full BLE scan.
+type ScanList struct {
+	scanEntries []ScanResult
 }
 
 func (scanList *ScanList) ScanEntries() []ScanResult {
@@ -86,7 +64,7 @@ func (scanList *ScanList) ScanEntries() []ScanResult {
 }
 
 func (scanEntry *ScanResult) ScanEntryString() string {
-	return fmt.Sprintf("name: %s, addr: [%s], MD: %X, Services: %v, RSSI: %3d", scanEntry.localName, scanEntry.addr, scanEntry.manufacData, scanEntry.services, scanEntry.rssi)
+	return fmt.Sprintf("name: %s, addr: [%s], RSSI: %3d", scanEntry.localName, scanEntry.addr, scanEntry.rssi)
 }
 
 func (scanEntry *ScanResult) LocalName() string {
@@ -99,7 +77,7 @@ func (scanEntry *ScanResult) RSSI() int {
 
 func (scanEntry *ScanResult) VehicleScanResult() *VehicleScanResult {
 	return &VehicleScanResult{
-		Address:     scanEntry.addr.String(),
+		Address:     scanEntry.addr,
 		LocalName:   scanEntry.localName,
 		RSSI:        int16(scanEntry.rssi),
 		Connectable: scanEntry.connectable,
@@ -134,6 +112,17 @@ func SetLogLevelPanic() {
 	log.SetLevel(log.LevelError)
 }
 
+func VehicleLocalName(vin string) string {
+	vinBytes := []byte(vin)
+	digest := sha1.Sum(vinBytes)
+	return fmt.Sprintf("S%02xC", digest[:8])
+}
+
+// IsVehicleLocalName reports whether s matches Tesla BLE local name format.
+func IsVehicleLocalName(s string) bool {
+	return vehicleLocalNamePattern.MatchString(s)
+}
+
 func ScanVehicleBeacon(ctx context.Context, vin string, adapter Adapter) (*Beacon, error) {
 	return adapter.ScanBeacon(ctx, VehicleLocalName(vin))
 }
@@ -146,10 +135,16 @@ func NewConnection(ctx context.Context, vin string, adapter Adapter) (*Connectio
 	return NewConnectionFromBeacon(ctx, vin, beacon, adapter)
 }
 
+// NewConnectionFromBeacon creates a new BLE connection to the given beacon.
 func NewConnectionFromBeacon(ctx context.Context, vin string, beacon *Beacon, adapter Adapter) (*Connection, error) {
 	var lastError error
 
-	if beacon.LocalName != VehicleLocalName(vin) {
+	localName := VehicleLocalName(vin)
+	if IsVehicleLocalName(vin) {
+		localName = vin
+	}
+
+	if beacon.LocalName != localName {
 		return nil, fmt.Errorf("ble: beacon with unexpected local name: '%s'", beacon.LocalName)
 	}
 
@@ -175,22 +170,22 @@ func NewConnectionFromBeacon(ctx context.Context, vin string, beacon *Beacon, ad
 }
 
 func tryToConnect(ctx context.Context, vin string, beacon *Beacon, adapter Adapter) (*Connection, error) {
-	device, err := adapter.Connect(ctx, beacon)
+	dev, err := adapter.Connect(ctx, beacon)
 	if err != nil {
 		return nil, err
 	}
 
-	service, err := device.Service(ctx, vehicleServiceUUID)
+	svc, err := dev.Service(ctx, vehicleServiceUUID)
 	if err != nil {
 		return nil, err
 	}
 
-	writer, err := service.Tx(toVehicleUUID)
+	w, err := svc.Tx(toVehicleUUID)
 	if err != nil {
 		return nil, err
 	}
 
-	txMtu, err := writer.MTU(maxBLEMTUSize)
+	txMtu, err := w.MTU(maxBLEMTUSize)
 	if err != nil {
 		txMtu = defaultMTU - 3 // Fallback to default MTU size
 	} else {
@@ -198,20 +193,45 @@ func tryToConnect(ctx context.Context, vin string, beacon *Beacon, adapter Adapt
 	}
 
 	conn := &Connection{
-		vin:    vin,
-		inbox:  make(chan []byte, 5),
-		device: device,
-		writer: writer,
-
+		vin:         vin,
+		inbox:       make(chan []byte, 5),
+		device:      dev,
+		writer:      w,
 		blockLength: txMtu,
+		rssi:        int(beacon.RSSI),
 	}
 
-	err = service.Rx(fromVehicleUUID, conn.rx)
+	err = svc.Rx(fromVehicleUUID, conn.rx)
 	if err != nil {
 		return nil, err
 	}
 
+	log.Info("Connected to vehicle BLE")
 	return conn, nil
+}
+
+// NewScan performs a full BLE scan and returns all Tesla vehicle beacons found.
+func NewScan(ctx context.Context, adapter Adapter) (*ScanList, error) {
+	scanList := &ScanList{}
+
+	err := adapter.ScanAll(ctx, func(beacon *Beacon) {
+		localName := beacon.LocalName
+		if len(localName) > 0 {
+			log.Debug("Advertisement from Name: %s [%s] RSSI: %3d:", localName, beacon.Address, beacon.RSSI)
+		}
+		if !IsVehicleLocalName(localName) {
+			return
+		}
+		log.Debug("Tesla vehicle found! Name: %s, RSSI: %3d, Connectable: %v", localName, beacon.RSSI, beacon.Connectable)
+		scanList.scanEntries = append(scanList.scanEntries, ScanResult{
+			localName:   localName,
+			addr:        beacon.Address,
+			rssi:        int(beacon.RSSI),
+			connectable: beacon.Connectable,
+		})
+	})
+
+	return scanList, err
 }
 
 func (c *Connection) Receive() <-chan []byte {
@@ -252,12 +272,14 @@ func (c *Connection) VIN() string {
 	return c.vin
 }
 
+func (c *Connection) RSSI() int {
+	return c.rssi
+}
+
 func (c *Connection) Close() {
 	if err := c.device.Close(); err != nil {
 		log.Warning("ble: failed to close device: %s", err)
 	}
-	// JW _ = c.client.ClearSubscriptions()
-	// JW _ = c.client.CancelConnection()
 }
 
 func (c *Connection) PreferredAuthMethod() connector.AuthMethod {
@@ -272,7 +294,6 @@ func (c *Connection) AllowedLatency() time.Duration {
 	return maxLatency
 }
 
-// JW func (c *Connection) rx(id uint, p []byte) {
 func (c *Connection) rx(p []byte) {
 	if time.Since(c.lastRx) > rxTimeout {
 		c.inputBuffer = []byte{}
@@ -281,10 +302,6 @@ func (c *Connection) rx(p []byte) {
 	c.inputBuffer = append(c.inputBuffer, p...)
 	for c.flush() {
 	}
-}
-
-func (c *Connection) RSSI() int {
-	return c.rssi
 }
 
 func (c *Connection) flush() bool {
@@ -308,3 +325,16 @@ func (c *Connection) flush() bool {
 	}
 	return false
 }
+
+// InitAdapterWithID is kept for backward compatibility.
+// In the new design, adapters are created via goble.NewAdapter or tinygo.NewAdapter.
+func InitAdapterWithID(_ string) error {
+	return nil
+}
+
+// CloseAdapter is kept for backward compatibility.
+// In the new design, adapters are closed via adapter.Close().
+func CloseAdapter() error {
+	return nil
+}
+

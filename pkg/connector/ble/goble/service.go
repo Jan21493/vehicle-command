@@ -1,16 +1,15 @@
 package goble
 
 import (
-	"bytes"
 	"fmt"
 
+	rigado "github.com/rigado/ble"
 	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
-	goble "github.com/zlymeda/go-ble"
 )
 
 type service struct {
-	client  goble.Client
-	service *goble.Service
+	client rigado.Client
+	svc    *rigado.Service
 }
 
 func (s *service) Rx(uuid string, callback func(buf []byte)) error {
@@ -18,11 +17,10 @@ func (s *service) Rx(uuid string, callback func(buf []byte)) error {
 	if err != nil {
 		return err
 	}
-
-	if err := s.client.Subscribe(characteristic, true, callback); err != nil {
+	// rigado's Subscribe callback has signature func(id uint, p []byte); wrap it.
+	if err := s.client.Subscribe(characteristic, true, func(_ uint, p []byte) { callback(p) }); err != nil {
 		return fmt.Errorf("ble: failed to subscribe to RX: %s", err)
 	}
-
 	return nil
 }
 
@@ -31,35 +29,22 @@ func (s *service) Tx(uuid string) (ble.Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	return &writer{
-		characteristic: characteristic,
-		client:         s.client,
-	}, nil
+	return &writer{characteristic: characteristic, client: s.client}, nil
 }
 
-func (s *service) discover(uuidStr string) (*goble.Characteristic, error) {
-	uuid := goble.MustParse(uuidStr)
-	characteristics, err := s.client.DiscoverCharacteristics([]goble.UUID{uuid}, s.service)
+func (s *service) discover(uuidStr string) (*rigado.Characteristic, error) {
+	uuid := rigado.MustParse(uuidStr)
+	characteristics, err := s.client.DiscoverCharacteristics([]rigado.UUID{uuid}, s.svc)
 	if err != nil {
 		return nil, fmt.Errorf("ble: failed to discover service characteristics: %s", err)
 	}
-
-	var characteristic *goble.Characteristic
 	for _, char := range characteristics {
-		if bytes.Equal(char.UUID, uuid) {
-			characteristic = char
-			break
+		if char.UUID.Equal(uuid) {
+			if _, err := s.client.DiscoverDescriptors(nil, char); err != nil {
+				return nil, fmt.Errorf("ble: couldn't fetch descriptors: %s", err)
+			}
+			return char, nil
 		}
 	}
-
-	if characteristic == nil {
-		return nil, fmt.Errorf("ble: failed to discover service characteristics: %s", err)
-	}
-
-	if _, err := s.client.DiscoverDescriptors(nil, characteristic); err != nil {
-		return nil, fmt.Errorf("ble: couldn't fetch descriptors: %s", err)
-	}
-
-	return characteristic, nil
+	return nil, fmt.Errorf("ble: characteristic %s not found", uuidStr)
 }

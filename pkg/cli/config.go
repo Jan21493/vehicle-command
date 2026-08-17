@@ -83,6 +83,7 @@ var DomainNames = map[protocol.Domain]string{
 // values.
 type DomainList []protocol.Domain
 
+
 // Set updates a DomainList from a command-line argument.
 func (d *DomainList) Set(value string) error {
 	canonicalName := strings.ToUpper(value)
@@ -104,10 +105,13 @@ func (d *DomainList) String() string {
 	return strings.Join(names, ",")
 }
 
+// BleImpl selects the BLE backend implementation.
 type BleImpl int
 
 const (
+	// Goble uses the rigado/ble (go-ble fork) BLE implementation (default).
 	Goble BleImpl = iota
+	// TinyGo uses the tinygo.org/x/bluetooth BLE implementation.
 	TinyGo
 )
 
@@ -194,6 +198,7 @@ type Config struct {
 	acct       *account.Account
 	skey       protocol.ECDHPrivateKey
 	oauthToken string
+	adapter    ble.Adapter
 }
 
 func NewConfig(flags Flag) (*Config, error) {
@@ -460,12 +465,12 @@ func (c *Config) ConnectCarLocalWithScanResult(ctx context.Context, target *ble.
 	c.VIN = target.LocalName
 
 	log.Debug("Connecting to car over BLE with cached scan result...")
-	err = ble.InitAdapterWithID(c.BtAdapterID)
+	adapter, err := c.getOrCreateAdapter()
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := ble.NewConnectionFromScanResult(ctx, c.VIN, target)
+	conn, err := ble.NewConnectionFromBeacon(ctx, c.VIN, target, adapter)
 	if err != nil {
 		return nil, err
 	}
@@ -480,6 +485,52 @@ func (c *Config) ConnectCarLocalWithScanResult(ctx context.Context, target *ble.
 		return nil, err
 	}
 	return
+}
+
+// getOrCreateAdapter lazily creates (and caches) a BLE adapter based on BtImpl.
+func (c *Config) getOrCreateAdapter() (ble.Adapter, error) {
+	if c.adapter != nil {
+		return c.adapter, nil
+	}
+	var err error
+	switch c.BtImpl {
+	case TinyGo:
+		c.adapter, err = tinygo.NewAdapter(c.BtAdapterID)
+	default: // Goble
+		c.adapter, err = goble.NewAdapter(c.BtAdapterID)
+	}
+	return c.adapter, err
+}
+
+// IsAdapterError returns true if the error is a BLE adapter initialization error
+// for the currently configured BLE backend.
+func (c *Config) IsAdapterError(err error) bool {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.IsAdapterError(err)
+	default:
+		return goble.IsAdapterError(err)
+	}
+}
+
+// AdapterErrorHelpMessage returns a human-readable message for a BLE adapter error.
+func (c *Config) AdapterErrorHelpMessage(err error) string {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.AdapterErrorHelpMessage(err)
+	default:
+		return goble.AdapterErrorHelpMessage(err)
+	}
+}
+
+// CloseAdapter releases the cached BLE adapter if one was created.
+func (c *Config) CloseAdapter() error {
+	if c.adapter != nil {
+		err := c.adapter.Close()
+		c.adapter = nil
+		return err
+	}
+	return nil
 }
 
 func (c *Config) loadCache() error {
@@ -592,7 +643,11 @@ func (c *Config) ConnectLocal(ctx context.Context, skey protocol.ECDHPrivateKey)
 func (c *Config) Scan(ctx context.Context) (scanList *ble.ScanList, err error) {
 	if c.Flags.isSet(FlagBLE) && c.Flags.isSet(FlagVIN) {
 		log.Debug("Scanning over BLE...")
-		scanList, err = ble.NewScan(ctx)
+		adapter, err := c.getOrCreateAdapter()
+		if err != nil {
+			return nil, err
+		}
+		scanList, err = ble.NewScan(ctx, adapter)
 	} else {
 		err = ErrNoAvailableTransports
 	}

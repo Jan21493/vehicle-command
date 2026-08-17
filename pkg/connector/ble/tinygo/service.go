@@ -8,8 +8,8 @@ import (
 )
 
 type service struct {
-	client  *bluetooth.Device
-	service bluetooth.DeviceService
+	client *bluetooth.Device
+	svc    bluetooth.DeviceService
 }
 
 func (s *service) Rx(uuid string, callback func(buf []byte)) error {
@@ -38,13 +38,13 @@ func (s *service) Tx(uuid string) (ble.Writer, error) {
 }
 
 func (s *service) discover(uuid string) (bluetooth.DeviceCharacteristic, error) {
-	characteristics, err := s.service.DiscoverCharacteristics([]bluetooth.UUID{mustParseUUID(uuid)})
+	characteristics, err := s.svc.DiscoverCharacteristics([]bluetooth.UUID{mustParseUUID(uuid)})
 	if err != nil {
 		return bluetooth.DeviceCharacteristic{}, fmt.Errorf("ble: failed to discover service characteristics: %s", err)
 	}
 
 	if len(characteristics) == 0 {
-		return bluetooth.DeviceCharacteristic{}, fmt.Errorf("ble: failed to discover service characteristics: %s", err)
+		return bluetooth.DeviceCharacteristic{}, fmt.Errorf("ble: no characteristics found for UUID %s", uuid)
 	}
 
 	return characteristics[0], nil

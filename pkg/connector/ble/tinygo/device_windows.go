@@ -1,6 +1,8 @@
 package tinygo
 
 import (
+	"fmt"
+
 	"tinygo.org/x/bluetooth"
 )
 
