@@ -105,8 +105,11 @@ func main() {
 	defer func() {
 		os.Exit(status)
 	}()
+	var config *cli.Config
 	defer func() {
-		_ = ble.CloseAdapter()
+		if config != nil {
+			_ = config.CloseAdapter()
+		}
 	}()
 
 	var (
@@ -115,7 +118,8 @@ func main() {
 		commandTimeout time.Duration
 		connTimeout    time.Duration
 	)
-	config, err := cli.NewConfig(cli.FlagAll)
+	var err error
+	config, err = cli.NewConfig(cli.FlagAll)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load credential configuration: %s\n", err)
 		os.Exit(1)

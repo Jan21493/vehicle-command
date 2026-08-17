@@ -58,14 +58,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/99designs/keyring"
 	"github.com/teslamotors/vehicle-command/internal/log"
 	"github.com/teslamotors/vehicle-command/pkg/account"
 	"github.com/teslamotors/vehicle-command/pkg/cache"
 	"github.com/teslamotors/vehicle-command/pkg/connector/ble"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble/goble"
+	"github.com/teslamotors/vehicle-command/pkg/connector/ble/tinygo"
 	"github.com/teslamotors/vehicle-command/pkg/protocol"
 	"github.com/teslamotors/vehicle-command/pkg/vehicle"
-
-	"github.com/99designs/keyring"
 )
 
 var DomainsByName = map[string]protocol.Domain{
@@ -81,6 +82,7 @@ var DomainNames = map[protocol.Domain]string{
 // DomainList is used to translate domains provided at the command line into native protocol.Domain
 // values.
 type DomainList []protocol.Domain
+
 
 // Set updates a DomainList from a command-line argument.
 func (d *DomainList) Set(value string) error {
@@ -101,6 +103,39 @@ func (d *DomainList) String() string {
 		}
 	}
 	return strings.Join(names, ",")
+}
+
+// BleImpl selects the BLE backend implementation.
+type BleImpl int
+
+const (
+	// Goble uses the rigado/ble (go-ble fork) BLE implementation (default).
+	Goble BleImpl = iota
+	// TinyGo uses the tinygo.org/x/bluetooth BLE implementation.
+	TinyGo
+)
+
+func (b *BleImpl) String() string {
+	switch *b {
+	case Goble:
+		return "goble"
+	case TinyGo:
+		return "tinygo"
+	default:
+		return "unknown"
+	}
+}
+
+func (b *BleImpl) Set(value string) error {
+	switch value {
+	case "goble":
+		*b = Goble
+	case "tinygo":
+		*b = TinyGo
+	default:
+		return fmt.Errorf("invalid BLE adapter: %s (valid options: goble, tinygo)", value)
+	}
+	return nil
 }
 
 // Environment variable names used are used by [Config.ReadFromEnvironment] to set common parameters.
@@ -145,6 +180,7 @@ type Config struct {
 	KeyringTokenName string // Username for OAuth token in system keyring
 	VIN              string
 	BtAdapterID      string // ID of Bluetooth adapter to use (Linux only)
+	BtImpl           BleImpl
 	TokenFilename    string
 	KeyFilename      string
 	CacheFilename    string
@@ -162,6 +198,7 @@ type Config struct {
 	acct       *account.Account
 	skey       protocol.ECDHPrivateKey
 	oauthToken string
+	adapter    ble.Adapter
 }
 
 func NewConfig(flags Flag) (*Config, error) {
@@ -207,6 +244,9 @@ func (c *Config) RegisterCommandLineFlags() {
 		flag.Var(&c.BackendType, "keyring-type", "Keyring `type` ("+strings.Join(names, "|")+"). Defaults to $TESLA_KEYRING_TYPE.")
 		flag.StringVar(&c.Backend.FileDir, "keyring-file-dir", keyringDirectory, "keyring `directory` for file-backed keyring types")
 		flag.BoolVar(&c.Debug, "keyring-debug", false, "Enable keyring debug logging")
+	}
+	if c.Flags.isSet(FlagBLE) {
+		flag.Var(&c.BtImpl, "bt-impl", "BLE implementation to use. Allowed values are \"tinygo\" and \"goble\" (default)")
 	}
 	c.registerCommandLineFlagsOsSpecific()
 }
@@ -347,7 +387,7 @@ func (c *Config) Connect(ctx context.Context) (acct *account.Account, car *vehic
 	// provided ones.
 	var skey protocol.ECDHPrivateKey
 	skey, err = c.PrivateKey()
-	if err != nil && err != ErrNoKeySpecified {
+	if err != nil && !errors.Is(err, ErrNoKeySpecified) {
 		return nil, nil, err
 	}
 
@@ -425,12 +465,12 @@ func (c *Config) ConnectCarLocalWithScanResult(ctx context.Context, target *ble.
 	c.VIN = target.LocalName
 
 	log.Debug("Connecting to car over BLE with cached scan result...")
-	err = ble.InitAdapterWithID(c.BtAdapterID)
+	adapter, err := c.getOrCreateAdapter()
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := ble.NewConnectionFromScanResult(ctx, c.VIN, target)
+	conn, err := ble.NewConnectionFromBeacon(ctx, c.VIN, target, adapter)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +485,52 @@ func (c *Config) ConnectCarLocalWithScanResult(ctx context.Context, target *ble.
 		return nil, err
 	}
 	return
+}
+
+// getOrCreateAdapter lazily creates (and caches) a BLE adapter based on BtImpl.
+func (c *Config) getOrCreateAdapter() (ble.Adapter, error) {
+	if c.adapter != nil {
+		return c.adapter, nil
+	}
+	var err error
+	switch c.BtImpl {
+	case TinyGo:
+		c.adapter, err = tinygo.NewAdapter(c.BtAdapterID)
+	default: // Goble
+		c.adapter, err = goble.NewAdapter(c.BtAdapterID)
+	}
+	return c.adapter, err
+}
+
+// IsAdapterError returns true if the error is a BLE adapter initialization error
+// for the currently configured BLE backend.
+func (c *Config) IsAdapterError(err error) bool {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.IsAdapterError(err)
+	default:
+		return goble.IsAdapterError(err)
+	}
+}
+
+// AdapterErrorHelpMessage returns a human-readable message for a BLE adapter error.
+func (c *Config) AdapterErrorHelpMessage(err error) string {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.AdapterErrorHelpMessage(err)
+	default:
+		return goble.AdapterErrorHelpMessage(err)
+	}
+}
+
+// CloseAdapter releases the cached BLE adapter if one was created.
+func (c *Config) CloseAdapter() error {
+	if c.adapter != nil {
+		err := c.adapter.Close()
+		c.adapter = nil
+		return err
+	}
+	return nil
 }
 
 func (c *Config) loadCache() error {
@@ -528,29 +614,29 @@ func (c *Config) ConnectRemote(ctx context.Context, skey protocol.ECDHPrivateKey
 }
 
 // ConnectLocal connects to a vehicle over BLE.
-func (c *Config) ConnectLocal(ctx context.Context, skey protocol.ECDHPrivateKey) (car *vehicle.Vehicle, err error) {
-	err = ble.InitAdapterWithID(c.BtAdapterID)
+func (c *Config) ConnectLocal(ctx context.Context, skey protocol.ECDHPrivateKey) (*vehicle.Vehicle, error) {
+	adapter, err := c.getOrCreateAdapter()
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := ble.NewConnection(ctx, c.VIN)
+	conn, err := ble.NewConnection(ctx, c.VIN, adapter)
 	if err != nil {
 		return nil, err
 	}
 
-	car, err = vehicle.NewVehicle(conn, skey, c.sessions)
-	if err != nil {
-		return nil, err
-	}
-	return
+	return vehicle.NewVehicle(conn, skey, c.sessions)
 }
 
 // Scan scans for BLE advertisements.
 func (c *Config) Scan(ctx context.Context) (scanList *ble.ScanList, err error) {
 	if c.Flags.isSet(FlagBLE) && c.Flags.isSet(FlagVIN) {
 		log.Debug("Scanning over BLE...")
-		scanList, err = ble.NewScan(ctx)
+		adapter, err := c.getOrCreateAdapter()
+		if err != nil {
+			return nil, err
+		}
+		scanList, err = ble.NewScan(ctx, adapter)
 	} else {
 		err = ErrNoAvailableTransports
 	}

@@ -179,8 +179,8 @@ func main() {
 
 	acct, car, err := config.Connect(ctx)
 	if err != nil {
-		if ble.IsAdapterError(err) {
-			writeErr("%s", ble.AdapterErrorHelpMessage(err))
+		if config.IsAdapterError(err) {
+			writeErr("%s", config.AdapterErrorHelpMessage(err))
 		} else {
 			writeErr("Error: %s", err)
 		}

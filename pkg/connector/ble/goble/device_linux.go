@@ -1,4 +1,4 @@
-package ble
+package goble
 
 import (
 	"os"
@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	// "github.com/go-ble/ble"
-	// "github.com/go-ble/ble/linux"
-	// "github.com/go-ble/ble/linux/hci/cmd"
 	"github.com/rigado/ble"
 	"github.com/rigado/ble/linux"
 	"github.com/rigado/ble/linux/hci/cmd"
@@ -45,8 +42,6 @@ func AdapterErrorHelpMessage(err error) string {
 
 const bleTimeout = 20 * time.Second
 
-// TODO: Depending on the model and state, BLE advertisements come every 20ms or every 150ms.
-
 var scanParams = cmd.LESetScanParameters{
 	LEScanType:           1,    // Active scanning
 	LEScanInterval:       0x10, // 10ms
@@ -55,16 +50,7 @@ var scanParams = cmd.LESetScanParameters{
 	ScanningFilterPolicy: 0,    // Basic unfiltered
 }
 
-func newDevice() (ble.Device, error) {
-	// Use auto adapter selection to avoid fixed-ID retry issues in the underlying BLE transport.
-	device, err := linux.NewDevice(ble.OptListenerTimeout(bleTimeout), ble.OptDialerTimeout(bleTimeout), ble.OptTransportHCISocket(-1), ble.OptScanParams(scanParams))
-	if err != nil {
-		return nil, err
-	}
-	return device, nil
-}
-
-func newAdapter(id *string) (ble.Device, error) {
+func newAdapter(id string) (ble.Device, error) {
 	hciID := -1
 	opts := []ble.Option{
 		ble.OptDialerTimeout(bleTimeout),
@@ -72,11 +58,11 @@ func newAdapter(id *string) (ble.Device, error) {
 		ble.OptScanParams(scanParams),
 		ble.OptTransportHCISocket(hciID),
 	}
-	if id != nil && *id != "" {
-		if !strings.HasPrefix(*id, "hci") {
+	if id != "" {
+		if !strings.HasPrefix(id, "hci") {
 			return nil, ErrAdapterInvalidID
 		}
-		hciStr := strings.TrimPrefix(*id, "hci")
+		hciStr := strings.TrimPrefix(id, "hci")
 		parsedID, err := strconv.Atoi(hciStr)
 		if err != nil || parsedID < 0 || parsedID > 15 {
 			return nil, ErrAdapterInvalidID
