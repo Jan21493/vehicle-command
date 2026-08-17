@@ -1,8 +1,6 @@
 package goble
 
 import (
-	// "github.com/go-ble/ble"
-	// "github.com/go-ble/ble/darwin"
 	"github.com/rigado/ble"
 	"github.com/rigado/ble/darwin"
 	"github.com/teslamotors/vehicle-command/internal/log"

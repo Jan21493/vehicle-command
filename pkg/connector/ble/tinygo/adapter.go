@@ -135,9 +135,10 @@ func (s *adapter) Close() error {
 
 func advertisementToBeacon(result bluetooth.ScanResult) *ble.Beacon {
 	return &ble.Beacon{
-		Address:     result.Address.String(),
-		LocalName:   result.LocalName(),
-		RSSI:        result.RSSI,
+		Address:   result.Address.String(),
+		LocalName: result.LocalName(),
+		RSSI:      result.RSSI,
+		// tinygo/x/bluetooth does not expose the connectable PDU type; default to true.
 		Connectable: true,
 	}
 }

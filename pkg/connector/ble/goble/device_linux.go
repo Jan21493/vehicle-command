@@ -6,9 +6,6 @@ import (
 	"strings"
 	"time"
 
-	// "github.com/go-ble/ble"
-	// "github.com/go-ble/ble/linux"
-	// "github.com/go-ble/ble/linux/hci/cmd"
 	"github.com/rigado/ble"
 	"github.com/rigado/ble/linux"
 	"github.com/rigado/ble/linux/hci/cmd"

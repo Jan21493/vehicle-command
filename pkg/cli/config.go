@@ -502,6 +502,27 @@ func (c *Config) getOrCreateAdapter() (ble.Adapter, error) {
 	return c.adapter, err
 }
 
+// IsAdapterError returns true if the error is a BLE adapter initialization error
+// for the currently configured BLE backend.
+func (c *Config) IsAdapterError(err error) bool {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.IsAdapterError(err)
+	default:
+		return goble.IsAdapterError(err)
+	}
+}
+
+// AdapterErrorHelpMessage returns a human-readable message for a BLE adapter error.
+func (c *Config) AdapterErrorHelpMessage(err error) string {
+	switch c.BtImpl {
+	case TinyGo:
+		return tinygo.AdapterErrorHelpMessage(err)
+	default:
+		return goble.AdapterErrorHelpMessage(err)
+	}
+}
+
 // CloseAdapter releases the cached BLE adapter if one was created.
 func (c *Config) CloseAdapter() error {
 	if c.adapter != nil {
