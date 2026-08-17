@@ -408,8 +408,12 @@ func tryToConnect(ctx context.Context, vin string, target *VehicleScanResult) (*
 	}
 
 	if !target.Connectable {
-		// The vehicle is already connected to the maximum number of BLE devices.
-		return nil, true, ErrMaxConnectionsExceeded
+		// Incomplete packet detected: log warning and wait for slower hardware, e.g. OrangePI zero 3
+		log.Warning("ble: incomplete data (not connectable). Wait to sync ...")
+		time.Sleep(300 * time.Millisecond) 
+		
+		// Throw error to calling function for retry with socket close
+		return nil, true, errors.New("ble: temporary sync error, retrying")
 	}
 
 	log.Debug("Dialing to %s (%s)...", target.Address, localName)
